@@ -31,14 +31,20 @@
 
 ## 启停
 
-全部通过 `scripts/pg-local.ps1`（`-PgHome` / `-Port` 可覆盖默认值）：
+全部通过 `scripts/pg-local.ps1`（`-PgHome` / `-Port` 可覆盖默认值）。
+
+> **注意 `pwsh` 不是人人在用的东西**：`pwsh` 是 PowerShell 7，这台机器只有
+> Windows PowerShell 5.1，所以下表的 `scripts\pg-local.cmd` 包装才是本机能直接跑的
+> 形式（它等价于 `powershell -NoProfile -ExecutionPolicy Bypass -File
+> scripts\pg-local.ps1 ...`）。装了 PS7 的机器把 `.cmd` 换成
+> `pwsh -File scripts/pg-local.ps1` 即可。
 
 ```powershell
-pwsh -File scripts/pg-local.ps1 -Action init      # 首次：下载 + 解压 + initdb（已做过）
-pwsh -File scripts/pg-local.ps1 -Action start     # 启动（Start-Process，不占终端）
-pwsh -File scripts/pg-local.ps1 -Action status    # pg_isready + select version()
-pwsh -File scripts/pg-local.ps1 -Action stop      # pg_ctl -m fast stop
-pwsh -File scripts/pg-local.ps1 -Action psql      # 交互式 psql
+scripts\pg-local.cmd -Action init      # 首次：下载 + 解压 + initdb（已做过）
+scripts\pg-local.cmd -Action start     # 启动（Start-Process，不占终端）
+scripts\pg-local.cmd -Action status    # pg_isready + select version()
+scripts\pg-local.cmd -Action stop      # pg_ctl -m fast stop
+scripts\pg-local.cmd -Action psql      # 交互式 psql
 ```
 
 线上/CI 之外的 Linux 机器上不用这个脚本，直接 `initdb` + `pg_ctl`；命令等价。
@@ -46,8 +52,8 @@ pwsh -File scripts/pg-local.ps1 -Action psql      # 交互式 psql
 ## 迁移与验证
 
 ```powershell
-pwsh -File scripts/pg-local.ps1 -Action migrate   # 应用 db/migrations/*.sql（幂等，跳过已应用的）
-pwsh -File scripts/pg-local.ps1 -Action probe     # 跑 db/probes/*.probe.sql
+scripts\pg-local.cmd -Action migrate   # 应用 db/migrations/*.sql（幂等，跳过已应用的）
+scripts\pg-local.cmd -Action probe     # 跑 db/probes/*.probe.sql
 ```
 
 `migrate` 用一张 `schema_migrations(version)` 表记录已应用文件。它**不是**迁移框架：
@@ -98,7 +104,7 @@ go test -count=1 -v ./services/account/ ./services/economy/
 ## 卸载
 
 ```powershell
-pwsh -File scripts/pg-local.ps1 -Action stop
+scripts\pg-local.cmd -Action stop
 Remove-Item -Recurse -Force C:\Users\CoderYkj\pgsql16
 ```
 

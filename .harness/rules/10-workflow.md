@@ -22,7 +22,7 @@
    - `e2e/flow_test.go` 看现有闭环断言。
 3. **给计划**（≤10 行）：改哪些文件、加哪些 op、加哪些测试、跑哪条验证。
 4. **小步实施**：一次一个包；每步 `go build ./... && go test ./<包>`。
-5. **收尾**：`pwsh -File scripts/verify.ps1`（或 `make verify`），贴输出。
+5. **收尾**：`scripts\verify.cmd`（或 `make verify`），贴输出。
 6. **等人工审 diff**，不自行 commit / push / 部署。
 
 ## 计划模板

@@ -6,12 +6,15 @@
 # "binaries zip" is a plain zip: unpack it, initdb as your own user, run the
 # postmaster as your own process. Nothing is installed, nothing is registered.
 #
-#   pwsh -File scripts/pg-local.ps1 -Action init     # download + unpack + initdb
-#   pwsh -File scripts/pg-local.ps1 -Action start
-#   pwsh -File scripts/pg-local.ps1 -Action status
-#   pwsh -File scripts/pg-local.ps1 -Action stop
-#   pwsh -File scripts/pg-local.ps1 -Action migrate  # apply db/migrations/*.sql
-#   pwsh -File scripts/pg-local.ps1 -Action probe    # run db/probes/*.probe.sql
+#   scripts\pg-local.cmd -Action init     # download + unpack + initdb  (Windows 5.1)
+#   scripts\pg-local.cmd -Action start
+#   scripts\pg-local.cmd -Action status
+#   scripts\pg-local.cmd -Action stop
+#   scripts\pg-local.cmd -Action migrate  # apply db/migrations/*.sql
+#   scripts\pg-local.cmd -Action probe    # run db/probes/*.probe.sql
+#   scripts\pg-local.cmd -Action grant    # schema/table/sequence privileges
+#
+# PowerShell 7 machines can use: pwsh -File scripts/pg-local.ps1 -Action <same>
 #
 # The default port is 55432, not 5432: a throwaway instance should never collide
 # with a real one. Override with -Port.
@@ -40,7 +43,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 function Find-PgTool([string]$name) {
     $path = Join-Path $bin "$name.exe"
     if (-not (Test-Path $path)) {
-        throw "$name not found at $path - run: pwsh -File scripts/pg-local.ps1 -Action init"
+        throw "$name not found at $path - run: scripts\pg-local.cmd -Action init"
     }
     return $path
 }
@@ -81,7 +84,7 @@ switch ($Action) {
             if ($LASTEXITCODE -ne 0) { throw "initdb failed (exit $LASTEXITCODE)" }
         }
         Write-Host "initialised: $data" -ForegroundColor Green
-        Write-Host "next: pwsh -File scripts/pg-local.ps1 -Action start" -ForegroundColor Green
+        Write-Host "next: scripts\pg-local.cmd -Action start" -ForegroundColor Green
     }
     'start' {
         $postgres = Find-PgTool 'postgres'

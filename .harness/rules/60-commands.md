@@ -48,7 +48,7 @@ curl 生产域名
 
 ```bash
 # Windows
-pwsh -File scripts/verify.ps1
+scripts\verify.cmd              # Windows 5.1；装了 PS7 可用 pwsh -File scripts/verify.ps1
 
 # Linux / CI
 make verify
@@ -68,7 +68,7 @@ go run ./tools/apigen -check
 
 ```bash
 # 本机实例（Windows 免安装，见 docs/postgres-local.md）
-pwsh -File scripts/pg-local.ps1 -Action start|stop|status|migrate|probe|grant
+scripts\pg-local.cmd -Action start|stop|status|migrate|probe|grant
 
 # 跑「内存实现 vs SQL 实现」等价性测试（无此变量则 skip）
 $env:BACKEND_TEST_DATABASE_URL = 'postgres://gamebackend:gamebackend@127.0.0.1:55432/gamebackend?sslmode=disable'

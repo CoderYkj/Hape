@@ -63,7 +63,7 @@ curl -s localhost:8080/v1/economy/players/p_1/ledger -H 'Authorization: Bearer d
 
 | 检查 | 命令 / 期望 |
 |---|---|
-| 全量门禁 | `pwsh -File scripts/verify.ps1` → `VERIFY OK` |
+| 全量门禁 | `scripts\verify.cmd` → `VERIFY OK`（PowerShell 5.1 的机器直接用这个） |
 | 契约未漂移 | `go run ./tools/apigen -check` → 无输出、退出码 0 |
 | 端到端闭环 | `go test ./e2e -run TestMatchLifecycle -v` |
 | 并发安全 | `go test -race ./...`（需 C 编译器 / cgo） |

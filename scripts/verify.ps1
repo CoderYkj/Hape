@@ -1,8 +1,9 @@
 #!/usr/bin/env pwsh
 # verify — the single gate for this repo.
 #
-#   pwsh -File scripts/verify.ps1          # gofmt + vet + build + test + contract
-#   pwsh -File scripts/verify.ps1 -Race    # same, with the race detector
+#   scripts\verify.cmd          # Windows PowerShell 5.1: gofmt + vet + build + test + contract
+#   scripts\verify.cmd -Race    # same, with the race detector
+#   pwsh -File scripts/verify.ps1 [ -Race ]   # PowerShell 7 machines
 #
 # Everything it runs is also documented in .harness/rules/60-commands.md.
 [CmdletBinding()]

@@ -6,6 +6,7 @@
 *.go    text eol=lf
 *.sh    text eol=lf
 *.ps1   text eol=lf
+*.cmd   text eol=crlf
 *.md    text eol=lf
 *.yml   text eol=lf
 *.json  text eol=lf

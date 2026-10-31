@@ -27,7 +27,13 @@
 
 ## 2. 快速命令
 
-在本仓库根目录执行（Windows 用 `scripts\verify.ps1`，Linux/CI 用 `make verify`）：
+在本仓库根目录执行。**`pwsh` 是 PowerShell 7，不是每台机器都有**（本机只有
+Windows PowerShell 5.1），所以 Windows 上优先用 `scripts\*.cmd` 包装：
+
+- `scripts\verify.cmd` → 等价于 `powershell -ExecutionPolicy Bypass -File scripts\verify.ps1`
+- `scripts\pg-local.cmd -Action <start|stop|status|migrate|probe|grant>`
+- 装了 PowerShell 7 的机器可以照常用 `pwsh -File scripts/verify.ps1`
+
 
 | 目的 | 命令 |
 |---|---|
@@ -39,9 +45,9 @@
 | 格式 | `gofmt -l .`（有输出即失败）/ `gofmt -w .` |
 | 重生成契约 | `go run ./tools/apigen` |
 | 契约漂移检查 | `go run ./tools/apigen -check` |
-| 全量校验 | `pwsh -File scripts/verify.ps1` 或 `make verify` |
-| 本地数据库 | `pwsh -File scripts/pg-local.ps1 -Action start`（详见 `docs/postgres-local.md`） |
-| 跑 schema 探针 | `pwsh -File scripts/pg-local.ps1 -Action probe`（需本地库已起） |
+| 全量校验 | `scripts\verify.cmd` 或 `powershell -ExecutionPolicy Bypass -File scripts\verify.ps1` 或 `make verify` |
+| 本地数据库 | `scripts\pg-local.cmd -Action start`（详见 `docs/postgres-local.md`） |
+| 跑 schema 探针 | `scripts\pg-local.cmd -Action probe`（需本地库已起） |
 
 `verify` 依次执行：`gofmt -l` → `go vet` → `go build` → `go test` → `apigen -check`，任一失败即整体失败。
 

@@ -21,8 +21,8 @@ go run ./tools/fakeds          # 另开一个终端：模拟一场完整对局
 想让它真的落库（账号 + 经济两域已接 Postgres，其余仍是内存）：
 
 ```powershell
-pwsh -File scripts/pg-local.ps1 -Action start
-pwsh -File scripts/pg-local.ps1 -Action migrate
+scripts\pg-local.cmd -Action start
+scripts\pg-local.cmd -Action migrate
 $env:BACKEND_DATABASE_URL = 'postgres://gamebackend:gamebackend@127.0.0.1:55432/gamebackend?sslmode=disable'
 go run ./cmd/platform
 ```
@@ -32,7 +32,7 @@ go run ./cmd/platform
 全量校验（格式 / vet / build / 测试 / 契约漂移）:
 
 ```bash
-pwsh -File scripts/verify.ps1     # Windows
+scripts\verify.cmd                # Windows (PowerShell 5.1 也行)
 make verify                       # Linux / CI
 ```
 
