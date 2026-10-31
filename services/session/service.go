@@ -278,6 +278,10 @@ func (s *Service) submitResult(r *http.Request) (any, error) {
 		return nil, err
 	}
 	if current.ResultID == req.ResultID {
+		// Settlement logs must say what was (not) applied, so an on-call reader
+		// can tell a replay from a first landing without reading the payload.
+		s.log.InfoContext(r.Context(), "battle report replayed", "session_id", sessionID,
+			"result_id", req.ResultID, "applied", false)
 		return SubmitResultResponse{Session: current, Applied: false}, nil
 	}
 	if current.ResultID != "" {
@@ -328,7 +332,8 @@ func (s *Service) submitResult(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.log.InfoContext(r.Context(), "session finished", "session_id", sessionID, "result_id", req.ResultID)
+	s.log.InfoContext(r.Context(), "session finished", "session_id", sessionID,
+		"result_id", req.ResultID, "applied", true)
 	return SubmitResultResponse{Session: updated, Applied: true}, nil
 }
 

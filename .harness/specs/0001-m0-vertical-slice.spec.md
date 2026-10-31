@@ -89,7 +89,8 @@ SQL schema 见 `db/migrations/0001_init.sql`（M2 目标，v0 未启用）。
 
 ## 7. 可观测性
 
-访问日志一请求一行；结算链路日志带 `session_id`、`result_id`、`applied`。
+访问日志一请求一行；结算链路日志带 `session_id`、`result_id`、`applied`
+（首次落地 `applied=true`，重放 `applied=false`，两者都有一行）。
 `/metrics` 暴露 `backend_requests_total{service,op,status}`。
 
 ## 8. 测试计划
@@ -99,6 +100,7 @@ SQL schema 见 `db/migrations/0001_init.sql`（M2 目标，v0 未启用）。
 | 单元 | `pkg/api`：形状反射、路径参数、重复路由校验 |
 | 契约 | `platform`：op 合法、7 个服务都有 op、写操作声明重试语义、session 写操作必须 service auth |
 | e2e | 完整闭环；匿名读、越权读、客户端伪造战报、重复上报、冲突上报、余额不足、未知字段 |
+| 失败模式 | `services/session`：分配失败→503+会话 failed、扇出失败→503+会话保持 ready 且可重试、战报玩家集合必须与名单一致、非参战者读会话→403、名单校验（<2 / 重复 / 空） |
 
 ## 9. 回滚方案
 
