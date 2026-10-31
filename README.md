@@ -46,6 +46,7 @@ make verify                       # Linux / CI
 | 新人 | 本文件 -> `docs/architecture.md` -> `docs/runbook-local-dev.md` |
 | 改接口的人 | `docs/api-contract.md` + `.harness/rules/30-api-contract.md` |
 | 接战斗服的人 | `docs/ue5-ds-integration.md` + `.harness/rules/90-battle-integration.md` |
+| 要接托管厂商的人 | `docs/edgegap-setup.md`（第一家：控制台要建什么、API 形状、后端配置） |
 | 要部署的人 | `docs/deploy.md`（镜像 / compose / 环境变量 / 探针 / 回滚） |
 | 要连数据库的人 | `docs/postgres-local.md`（本机免安装实例）+ `.harness/adr/0006`（驱动选型待拍板） |
 
@@ -75,7 +76,7 @@ nakama/         Nakama Go 模块（RPC 桥接，未验证）
 deploy/         docker-compose：postgres + backend + nakama（未验证）
 Dockerfile      多阶段构建，alpine + 非 root 静态二进制（未验证）
 .dockerignore   构建上下文收敛到 Go 源码（刻意不含 .git）
-docs/           架构、契约、UE5 对接、本地运行手册、部署手册
+docs/           架构、契约、UE5 对接、本地运行手册、部署手册、Edgegap 接入指引
 .harness/       规则 / 规格模板 / ADR
 ```
 
