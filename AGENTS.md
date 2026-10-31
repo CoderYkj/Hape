@@ -40,6 +40,8 @@
 | 重生成契约 | `go run ./tools/apigen` |
 | 契约漂移检查 | `go run ./tools/apigen -check` |
 | 全量校验 | `pwsh -File scripts/verify.ps1` 或 `make verify` |
+| 本地数据库 | `pwsh -File scripts/pg-local.ps1 -Action start`（详见 `docs/postgres-local.md`） |
+| 跑 schema 探针 | `pwsh -File scripts/pg-local.ps1 -Action probe`（需本地库已起） |
 
 `verify` 依次执行：`gofmt -l` → `go vet` → `go build` → `go test` → `apigen -check`，任一失败即整体失败。
 

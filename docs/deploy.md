@@ -151,6 +151,8 @@ M0 没有可部署目标，所以这一步是模板，不是已验证的流水�
 未验证（有文件、没跑过）：
 
 - `Dockerfile`、`.dockerignore`、`deploy/docker-compose.yml`（含新增的 `backend` 服务）
+- 迁移的**部署**路径：`0001_init.sql` 已在本地 Postgres 16.4 上执行并验证（见
+  `docs/postgres-local.md`），但"部署时由谁执行迁移"仍未接（第 7 节第 1 步）
 - Nakama 镜像 tag `3.22.0` 与那串启动参数
 - `nakama/modules` 插件能否真正编译进镜像（`go build -buildmode=plugin`，本机无网络拉 `nakama-common`）
 
@@ -158,5 +160,6 @@ M0 没有可部署目标，所以这一步是模板，不是已验证的流水�
 
 1. registry + CI 里的镜像构建与推送任务（`.github/workflows/ci.yml` 目前只镜像 `verify.sh` 的步骤，故意保持一一对应）
 2. 生产 `Authenticator`（Nakama JWT 校验），有了它 `prod` 才可能真的启动
-3. `db/migrations/0001_init.sql` 的执行路径（M1，配合 SQL store）
+3. `db/migrations/0001_init.sql` 的**生产执行路径**（本机已验证可执行；生产需要
+   runner 或部署步骤，且要与 SQL store 同批上线）
 4. Kubernetes / 单机 systemd 的清单：现在只有 compose，没有生产编排

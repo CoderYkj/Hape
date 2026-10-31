@@ -1,10 +1,11 @@
 -- ============================================================================
 -- 0001_init.sql — 全量初始 schema（Postgres 16）
 --
--- 状态：**M2 目标产物，v0 未接线**。
---   v0 的 7 个服务全部挂在 `services/*/store.go` 的内存实现上；本文件是把那套
---   内存语义 1:1 翻译成 SQL 的设计产物，用于评审数据模型与幂等约束。
---   落地前不要假设它已被执行过：CI 不跑数据库，本文件也没有任何自动化测试。
+-- 状态：**已在 Postgres 16.4 上执行过**（本机免安装实例，见 docs/postgres-local.md）。
+--   约束用 `db/probes/0001_constraints.probe.sql` 逐条验证：幂等键、余额非负、
+--   状态机守卫、一人一队、一会话一战报都会被数据库拒绝。
+--   仍未接线到 Go：v0 的 7 个服务跑在 `services/*/store.go` 的内存实现上，
+--   换 SQL store 是 M1，那一步才需要驱动依赖（见 ADR 0006）。
 --
 -- 约定：
 --   * 时间是 timestamptz，全部用 now() 默认，不接受应用侧本地时间。
@@ -80,7 +81,9 @@ CREATE TABLE matchmaking_tickets (
     mmr        bigint      NOT NULL CHECK (mmr >= 0),
     -- 组队匹配时带上整队 id 列表；v0 只有单人票，数组为空。
     party      text[]      NOT NULL DEFAULT '{}',
-    status     text        NOT NULL CHECK (status IN ('waiting', 'matched', 'cancelled')),
+    -- DEFAULT is not cosmetic: a ticket is born waiting, and every caller that
+    -- omits the column would otherwise fail a NOT NULL check.
+    status     text        NOT NULL DEFAULT 'waiting' CHECK (status IN ('waiting', 'matched', 'cancelled')),
     match_id   text,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()

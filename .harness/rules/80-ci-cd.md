@@ -44,6 +44,9 @@ Agent 边界：**不得**执行任何 staging/prod 部署命令。只允许本�
 - 前向兼容三步走：加字段（nullable）→ 双写 → 回填 → 切读 → 删旧字段。
 - 破坏性变更必须能回滚；回滚方案写进 spec 的"回滚"一节。
 - 迁移在部署前独立执行，不做"应用启动自动迁移"。
+- 迁移必须配探针：`db/probes/*.probe.sql` 断言"该拒的必须被拒"。本机用
+  `scripts/pg-local.ps1 -Action probe` 跑；CI 目前没有 Postgres 服务，
+  所以探针**不在 CI 里**，别把"CI 绿"当成 schema 已验证。
 
 ## 发布检查单
 

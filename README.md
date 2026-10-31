@@ -34,6 +34,7 @@ make verify                       # Linux / CI
 | 改接口的人 | `docs/api-contract.md` + `.harness/rules/30-api-contract.md` |
 | 接战斗服的人 | `docs/ue5-ds-integration.md` + `.harness/rules/90-battle-integration.md` |
 | 要部署的人 | `docs/deploy.md`（镜像 / compose / 环境变量 / 探针 / 回滚） |
+| 要连数据库的人 | `docs/postgres-local.md`（本机免安装实例）+ `.harness/adr/0006`（驱动选型待拍板） |
 
 ## 三条不可协商
 
@@ -54,7 +55,8 @@ services/       7 个领域包，每个都有 DTO + Store 接口 + 内存实现 
 pkg/            基础设施：api(契约) / apierr(错误) / httpx(HTTP) / battlealloc(分配抽象)
 tools/          apigen(生成 OpenAPI) / fakeds(假战斗服)
 api/openapi/    生成的接口契约（勿手改）
-db/migrations/  Postgres schema 设计（M2 目标，v0 未接线）
+db/migrations/  Postgres schema（已在 16.4 上执行；Go 侧尚未接线）
+db/probes/      schema 约束的断言脚本（35 条，psql 可重跑）
 nakama/         Nakama Go 模块（RPC 桥接，未验证）
 deploy/         docker-compose：postgres + backend + nakama（未验证）
 Dockerfile      多阶段构建，alpine + 非 root 静态二进制（未验证）
@@ -71,6 +73,9 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 - `gofmt -l .` 无输出
 - `go run ./tools/apigen -check` 无漂移
 - `platform` + `fakeds` 完整对局闭环跑通（`OK: full match loop completed`）
+- `db/migrations/0001_init.sql` 在真实 Postgres 16.4 上执行成功（13 张表）；
+  `db/probes/0001_constraints.probe.sql` **35 条约束断言全 PASS**
+  （幂等键、余额非负、状态机守卫、一会话一战报、一人一队都被数据库拒绝）
 
 **未验证**（本机缺 docker / buf / make，且未接真实厂商）：
 
@@ -78,7 +83,7 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
   本机没有 Docker，`docker build` 与 `compose up` 都没跑过；详见 `docs/deploy.md`
 - `nakama/modules`：独立 Go module，`nakama-common` 版本号为占位，
   没编译过，没跑过
-- `db/migrations/0001_init.sql`：没有 Postgres 实例，未执行
+- Go 侧没有一行连数据库：7 个服务仍是内存存储（M1 的事，先定驱动，见 ADR 0006）
 - `docs/ue5-ds-integration.md` 里的 C++ 片段：未在 UE5 工程里编译
 - 真实托管战斗服（GameLift / EdgeGap / Agones）：只有接口与桩实现
 - `go test -race ./...`：本机没有 C 编译器（cgo 缺席）跑不了；CI 的 Linux
