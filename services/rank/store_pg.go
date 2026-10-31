@@ -32,8 +32,8 @@ func NewPG(pool *pgxpool.Pool) *PG { return &PG{pool: pool} }
 // and can live with the default. A database failure therefore degrades to
 // DefaultRating rather than failing the match: documented in ADR 0006 as debt to
 // fix when Store gains a context and an error.
-func (s *PG) RatingOf(board, playerID string) int64 {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) RatingOf(ctx context.Context, board, playerID string) int64 {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	var rating int64
@@ -47,12 +47,12 @@ func (s *PG) RatingOf(board, playerID string) int64 {
 }
 
 // Apply implements Store.
-func (s *PG) Apply(board, playerID, idempotencyKey string, won bool) (Rating, int64, bool, error) {
+func (s *PG) Apply(ctx context.Context, board, playerID, idempotencyKey string, won bool) (Rating, int64, bool, error) {
 	if idempotencyKey == "" {
 		return Rating{}, 0, false, apierr.Invalid("idempotency key is required")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	var (
@@ -134,8 +134,8 @@ func (s *PG) Apply(board, playerID, idempotencyKey string, won bool) (Rating, in
 }
 
 // Top implements Store.
-func (s *PG) Top(board string, limit int) (Leaderboard, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) Top(ctx context.Context, board string, limit int) (Leaderboard, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	if limit <= 0 {

@@ -56,7 +56,7 @@ func TestStoresAgree(t *testing.T) {
 		{"postgres", team.NewPG(pool)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			created, err := tc.store.Create(owner, "squad")
+			created, err := tc.store.Create(ctx, owner, "squad")
 			if err != nil {
 				t.Fatalf("create: %v", err)
 			}
@@ -64,7 +64,7 @@ func TestStoresAgree(t *testing.T) {
 				t.Fatalf("unexpected team: %+v", created)
 			}
 
-			joined, applied, err := tc.store.Join(created.ID, member)
+			joined, applied, err := tc.store.Join(ctx, created.ID, member)
 			if err != nil {
 				t.Fatalf("join: %v", err)
 			}
@@ -72,7 +72,7 @@ func TestStoresAgree(t *testing.T) {
 				t.Fatalf("join should apply: applied=%v members=%d", applied, len(joined.Members))
 			}
 
-			again, applied, err := tc.store.Join(created.ID, member)
+			again, applied, err := tc.store.Join(ctx, created.ID, member)
 			if err != nil {
 				t.Fatalf("replay join: %v", err)
 			}
@@ -80,7 +80,7 @@ func TestStoresAgree(t *testing.T) {
 				t.Fatalf("replay join must be a no-op: applied=%v members=%d", applied, len(again.Members))
 			}
 
-			read, err := tc.store.Get(created.ID)
+			read, err := tc.store.Get(ctx, created.ID)
 			if err != nil {
 				t.Fatalf("get: %v", err)
 			}
@@ -89,11 +89,11 @@ func TestStoresAgree(t *testing.T) {
 			}
 
 			// A player belongs to one team: a second team by the same owner is refused.
-			if _, err := tc.store.Create(owner, "second"); apierr.As(err).Code != apierr.CodeFailedPrecondition {
+			if _, err := tc.store.Create(ctx, owner, "second"); apierr.As(err).Code != apierr.CodeFailedPrecondition {
 				t.Fatalf("second team: code = %q, want failed_precondition", apierr.As(err).Code)
 			}
 
-			if _, err := tc.store.Get("t_missing"); apierr.As(err).Code != apierr.CodeNotFound {
+			if _, err := tc.store.Get(ctx, "t_missing"); apierr.As(err).Code != apierr.CodeNotFound {
 				t.Fatalf("unknown team: code = %q, want not_found", apierr.As(err).Code)
 			}
 		})

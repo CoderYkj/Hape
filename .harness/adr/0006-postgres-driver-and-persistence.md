@@ -60,8 +60,9 @@ handler、契约层、`platform` 的服务装配都不 import 驱动类型。
 
 ## 已知债务（写下来，别假装不存在）
 
-1. **`Store` 方法没有 `context`**。SQL 实现只能自己 `context.WithTimeout(3s)`，
-   请求取消无法向下传播。要修就得改所有 Store 接口与调用点，属于 M2。
+1. ~~**`Store` 方法没有 `context`**~~ → **已还**（spec 0003）：每个 Store 方法第一个
+   参数是 `ctx`，SQL 实现用 `context.WithTimeout(ctx, 3s)`，请求取消能一路传到数据库。
+   有测试钉住：已取消的 ctx 下查询立刻返回 `context.Canceled`。
 2. **跨域结算不是单个事务**。`platform/sink.go` 依次写进度、经济、排行，各自幂等，
    但不是一个事务；中途失败靠"同一 `result_id` 重试"收敛，而不是原子性。
 3. **两个无 error 返回的查询会静默降级**：`rank.RatingOf` 出错退化为默认分，
@@ -77,7 +78,12 @@ handler、契约层、`platform` 的服务装配都不 import 驱动类型。
    `UPDATE ... WHERE balance + $delta >= 0`，只有入账才用 upsert。
 2. **语句失败会让整个事务 abort**。撞唯一键后在同事务里再 `SELECT` 只会得到
    `25P02 current transaction is aborted`。重放路径必须先回滚、再在事务外读。
-3. **`DROP SCHEMA public; CREATE SCHEMA public` 会清掉授权**。新 schema 不再默认
+3. **进程内自增的 id 不是 id**。`session` 用 `s_<serial>`、`matchmaking` 用
+   `m_<queue>_<serial>`，在内存里够用；接上持久化后，进程重启又从头开始，于是
+   `sessions` 主键撞车、`sessions_one_per_match` 把新一轮的对局当成重复。现在
+   两者都改成时间基（与 account / team / matchmaking ticket 一致）。教训：
+   任何跨进程存在的实体，id 必须由时间或随机数生成，计数器只是方便。
+4. **`DROP SCHEMA public; CREATE SCHEMA public` 会清掉授权**。新 schema 不再默认
    给 PUBLIC 权限，应用角色会看到"relation does not exist"。授权属于环境，不是
    schema：`scripts/pg-local.ps1 -Action grant`。
 

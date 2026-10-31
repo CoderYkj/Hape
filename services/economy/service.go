@@ -8,6 +8,7 @@
 package economy
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -121,7 +122,7 @@ func (s *Service) getWallet(r *http.Request) (any, error) {
 	if err := httpx.RequireSelf(r, playerID); err != nil {
 		return nil, err
 	}
-	wallet, err := s.store.Wallet(playerID)
+	wallet, err := s.store.Wallet(r.Context(), playerID)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +134,7 @@ func (s *Service) getLedger(r *http.Request) (any, error) {
 	if err := httpx.RequireSelf(r, playerID); err != nil {
 		return nil, err
 	}
-	entries, err := s.store.Ledger(playerID)
+	entries, err := s.store.Ledger(r.Context(), playerID)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +154,7 @@ func (s *Service) grant(r *http.Request) (any, error) {
 	if err := httpx.Decode(r, &req); err != nil {
 		return nil, err
 	}
-	wallet, applied, err := s.store.Grant(playerID, key, req.Currency, req.Amount, req.Reason)
+	wallet, applied, err := s.store.Grant(r.Context(), playerID, key, req.Currency, req.Amount, req.Reason)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +179,7 @@ func (s *Service) purchase(r *http.Request) (any, error) {
 	if !IsCurrency(req.Currency) {
 		return nil, apierr.Invalid("unsupported currency").WithDetail("currency", req.Currency)
 	}
-	wallet, applied, err := s.store.Spend(playerID, key, req.Currency, req.Amount, req.ItemID)
+	wallet, applied, err := s.store.Spend(r.Context(), playerID, key, req.Currency, req.Amount, req.ItemID)
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +188,6 @@ func (s *Service) purchase(r *http.Request) (any, error) {
 
 // Grant applies a currency grant at the domain level. Shared by the HTTP
 // handler and the in-process match fan-out.
-func (s *Service) Grant(playerID, idempotencyKey, currency string, amount int64, reason string) (Wallet, bool, error) {
-	return s.store.Grant(playerID, idempotencyKey, currency, amount, reason)
+func (s *Service) Grant(ctx context.Context, playerID, idempotencyKey, currency string, amount int64, reason string) (Wallet, bool, error) {
+	return s.store.Grant(ctx, playerID, idempotencyKey, currency, amount, reason)
 }

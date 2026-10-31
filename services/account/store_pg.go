@@ -32,12 +32,12 @@ type PG struct {
 func NewPG(pool *pgxpool.Pool) *PG { return &PG{pool: pool} }
 
 // FindOrCreate implements Store.
-func (s *PG) FindOrCreate(externalID, displayName string) (Player, bool, error) {
+func (s *PG) FindOrCreate(ctx context.Context, externalID, displayName string) (Player, bool, error) {
 	if strings.TrimSpace(externalID) == "" {
 		return Player{}, false, apierr.Invalid("external_id is required").WithDetail("field", "external_id")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	id := newPlayerID()
@@ -69,8 +69,8 @@ func (s *PG) FindOrCreate(externalID, displayName string) (Player, bool, error) 
 }
 
 // GetByID implements Store.
-func (s *PG) GetByID(id string) (Player, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) GetByID(ctx context.Context, id string) (Player, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	player, err := s.scanPlayer(s.pool.QueryRow(ctx,
@@ -82,8 +82,8 @@ func (s *PG) GetByID(id string) (Player, error) {
 }
 
 // UpdateDisplayName implements Store.
-func (s *PG) UpdateDisplayName(id, displayName string) (Player, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) UpdateDisplayName(ctx context.Context, id, displayName string) (Player, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	player, err := s.scanPlayer(s.pool.QueryRow(ctx,

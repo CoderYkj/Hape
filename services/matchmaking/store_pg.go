@@ -29,8 +29,8 @@ type PG struct {
 func NewPG(pool *pgxpool.Pool) *PG { return &PG{pool: pool} }
 
 // Create implements Store.
-func (s *PG) Create(ticket Ticket) (Ticket, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) Create(ctx context.Context, ticket Ticket) (Ticket, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	if ticket.Party == nil {
@@ -68,8 +68,8 @@ func (s *PG) Create(ticket Ticket) (Ticket, error) {
 }
 
 // Get implements Store.
-func (s *PG) Get(id string) (Ticket, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) Get(ctx context.Context, id string) (Ticket, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 	return s.get(ctx, s.pool, id)
 }
@@ -79,8 +79,8 @@ func (s *PG) Get(id string) (Ticket, error) {
 // No error return: the interface treats "lookup failed" as "nothing waiting", and
 // the create path then hits the unique index, which is the real guard. Documented
 // as debt in ADR 0006.
-func (s *PG) FindWaitingByPlayer(queue, playerID string) (Ticket, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) FindWaitingByPlayer(ctx context.Context, queue, playerID string) (Ticket, bool) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	ticket, err := s.scanTicket(s.pool.QueryRow(ctx,
@@ -96,8 +96,8 @@ func (s *PG) FindWaitingByPlayer(queue, playerID string) (Ticket, bool) {
 }
 
 // Waiting implements Store.
-func (s *PG) Waiting(queue string) int {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) Waiting(ctx context.Context, queue string) int {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	var count int
@@ -113,8 +113,8 @@ func (s *PG) Waiting(queue string) int {
 //
 // The waiting rows are locked before selection, so two matchmakers popping the
 // same queue cannot hand the same player to two matches.
-func (s *PG) Pop(queue string, count int, band int64, matchID string) ([]Ticket, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) Pop(ctx context.Context, queue string, count int, band int64, matchID string) ([]Ticket, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	var chosen []Ticket

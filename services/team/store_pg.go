@@ -30,8 +30,8 @@ type PG struct {
 func NewPG(pool *pgxpool.Pool) *PG { return &PG{pool: pool} }
 
 // Create implements Store.
-func (s *PG) Create(ownerID, name string) (Team, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) Create(ctx context.Context, ownerID, name string) (Team, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	id := "t_" + strconv.FormatInt(time.Now().UnixNano(), 36)
@@ -71,15 +71,15 @@ func (s *PG) Create(ownerID, name string) (Team, error) {
 }
 
 // Get implements Store.
-func (s *PG) Get(id string) (Team, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) Get(ctx context.Context, id string) (Team, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 	return s.get(ctx, s.pool, id)
 }
 
 // Join implements Store.
-func (s *PG) Join(teamID, playerID string) (Team, bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) Join(ctx context.Context, teamID, playerID string) (Team, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	var (

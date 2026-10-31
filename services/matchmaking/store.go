@@ -1,6 +1,7 @@
 package matchmaking
 
 import (
+	"context"
 	"strconv"
 	"sync"
 	"time"
@@ -29,13 +30,13 @@ type Ticket struct {
 
 // Store is the persistence seam for the queue.
 type Store interface {
-	Create(ticket Ticket) (Ticket, error)
-	Get(id string) (Ticket, error)
+	Create(ctx context.Context, ticket Ticket) (Ticket, error)
+	Get(ctx context.Context, id string) (Ticket, error)
 	// FindWaitingByPlayer returns the caller's waiting ticket in a queue, or
 	// ErrNoWaiting. It makes enqueue idempotent without an idempotency key.
-	FindWaitingByPlayer(queue, playerID string) (Ticket, bool)
-	Pop(queue string, count int, band int64, matchID string) ([]Ticket, error)
-	Waiting(queue string) int
+	FindWaitingByPlayer(ctx context.Context, queue, playerID string) (Ticket, bool)
+	Pop(ctx context.Context, queue string, count int, band int64, matchID string) ([]Ticket, error)
+	Waiting(ctx context.Context, queue string) int
 }
 
 // ErrNoWaiting is returned when the queue holds no matchable tickets.
@@ -55,7 +56,7 @@ func NewMemory() *Memory {
 	return &Memory{byID: map[string]Ticket{}, waiting: map[string][]string{}, now: time.Now}
 }
 
-func (m *Memory) Create(ticket Ticket) (Ticket, error) {
+func (m *Memory) Create(_ context.Context, ticket Ticket) (Ticket, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -79,7 +80,7 @@ func (m *Memory) Create(ticket Ticket) (Ticket, error) {
 	return ticket, nil
 }
 
-func (m *Memory) Get(id string) (Ticket, error) {
+func (m *Memory) Get(_ context.Context, id string) (Ticket, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	ticket, ok := m.byID[id]
@@ -89,7 +90,7 @@ func (m *Memory) Get(id string) (Ticket, error) {
 	return ticket, nil
 }
 
-func (m *Memory) FindWaitingByPlayer(queue, playerID string) (Ticket, bool) {
+func (m *Memory) FindWaitingByPlayer(_ context.Context, queue, playerID string) (Ticket, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, id := range m.waiting[queue] {
@@ -100,13 +101,13 @@ func (m *Memory) FindWaitingByPlayer(queue, playerID string) (Ticket, bool) {
 	return Ticket{}, false
 }
 
-func (m *Memory) Waiting(queue string) int {
+func (m *Memory) Waiting(_ context.Context, queue string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.waiting[queue])
 }
 
-func (m *Memory) Pop(queue string, count int, band int64, matchID string) ([]Ticket, error) {
+func (m *Memory) Pop(_ context.Context, queue string, count int, band int64, matchID string) ([]Ticket, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

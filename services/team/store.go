@@ -1,6 +1,7 @@
 package team
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,9 +32,9 @@ type Team struct {
 
 // Store is the persistence seam for teams.
 type Store interface {
-	Create(ownerID, name string) (Team, error)
-	Get(id string) (Team, error)
-	Join(teamID, playerID string) (team Team, applied bool, err error)
+	Create(ctx context.Context, ownerID, name string) (Team, error)
+	Get(ctx context.Context, id string) (Team, error)
+	Join(ctx context.Context, teamID, playerID string) (team Team, applied bool, err error)
 }
 
 // Memory is the in-memory Store.
@@ -47,7 +48,7 @@ type Memory struct {
 // NewMemory builds an empty team store.
 func NewMemory() *Memory { return &Memory{byID: map[string]Team{}, now: time.Now} }
 
-func (m *Memory) Create(ownerID, name string) (Team, error) {
+func (m *Memory) Create(_ context.Context, ownerID, name string) (Team, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -72,7 +73,7 @@ func (m *Memory) Create(ownerID, name string) (Team, error) {
 	return team, nil
 }
 
-func (m *Memory) Get(id string) (Team, error) {
+func (m *Memory) Get(_ context.Context, id string) (Team, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	team, ok := m.byID[id]
@@ -82,7 +83,7 @@ func (m *Memory) Get(id string) (Team, error) {
 	return team, nil
 }
 
-func (m *Memory) Join(teamID, playerID string) (Team, bool, error) {
+func (m *Memory) Join(_ context.Context, teamID, playerID string) (Team, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

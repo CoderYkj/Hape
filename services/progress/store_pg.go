@@ -28,8 +28,8 @@ type PG struct {
 func NewPG(pool *pgxpool.Pool) *PG { return &PG{pool: pool} }
 
 // Get implements Store.
-func (s *PG) Get(playerID string) (Progress, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) Get(ctx context.Context, playerID string) (Progress, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	var (
@@ -61,7 +61,7 @@ func (s *PG) Get(playerID string) (Progress, error) {
 }
 
 // GrantXP implements Store.
-func (s *PG) GrantXP(playerID, idempotencyKey string, xp int64, reason string) (Progress, bool, error) {
+func (s *PG) GrantXP(ctx context.Context, playerID, idempotencyKey string, xp int64, reason string) (Progress, bool, error) {
 	if idempotencyKey == "" {
 		return Progress{}, false, apierr.Invalid("idempotency key is required")
 	}
@@ -72,7 +72,7 @@ func (s *PG) GrantXP(playerID, idempotencyKey string, xp int64, reason string) (
 		return Progress{}, false, apierr.Invalid("reason is required").WithDetail("field", "reason")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	var (

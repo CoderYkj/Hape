@@ -27,7 +27,7 @@ func (m *matchSink) MatchFinished(ctx context.Context, match session.FinishedMat
 		key := match.ResultID + ":" + player.PlayerID
 
 		xp := 50 + player.Score/10
-		if _, _, err := m.progress.Grant(player.PlayerID, key+":xp", xp, "match_reward"); err != nil {
+		if _, _, err := m.progress.Grant(ctx, player.PlayerID, key+":xp", xp, "match_reward"); err != nil {
 			errs = append(errs, err)
 		}
 
@@ -35,11 +35,11 @@ func (m *matchSink) MatchFinished(ctx context.Context, match session.FinishedMat
 		if player.Won {
 			gold = 100
 		}
-		if _, _, err := m.economy.Grant(player.PlayerID, key+":gold", economy.CurrencyGold, gold, "match_reward"); err != nil {
+		if _, _, err := m.economy.Grant(ctx, player.PlayerID, key+":gold", economy.CurrencyGold, gold, "match_reward"); err != nil {
 			errs = append(errs, err)
 		}
 
-		if _, _, _, err := m.rank.Apply(rank.DefaultBoard, player.PlayerID, key+":mmr", player.Won); err != nil {
+		if _, _, _, err := m.rank.Apply(ctx, rank.DefaultBoard, player.PlayerID, key+":mmr", player.Won); err != nil {
 			errs = append(errs, err)
 		}
 	}

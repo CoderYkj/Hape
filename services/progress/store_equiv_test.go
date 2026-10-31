@@ -57,8 +57,8 @@ func TestStoresAgree(t *testing.T) {
 		"grant zero xp",
 		"get final",
 	}
-	memOut := script(t, mem, player)
-	sqlOut := script(t, sqlStore, player)
+	memOut := script(t, ctx, mem, player)
+	sqlOut := script(t, ctx, sqlStore, player)
 
 	if len(memOut) != len(sqlOut) || len(memOut) != len(steps) {
 		t.Fatalf("step count: memory=%d sql=%d want=%d", len(memOut), len(sqlOut), len(steps))
@@ -85,7 +85,7 @@ type outcome struct {
 	errText string
 }
 
-func script(t *testing.T, store progress.Store, player string) []outcome {
+func script(t *testing.T, ctx context.Context, store progress.Store, player string) []outcome {
 	t.Helper()
 	var out []outcome
 	record := func(p progress.Progress, applied bool, err error) {
@@ -97,25 +97,25 @@ func script(t *testing.T, store progress.Store, player string) []outcome {
 		out = append(out, step)
 	}
 
-	p, err := store.Get(player)
+	p, err := store.Get(ctx, player)
 	record(p, false, err)
 
-	p, applied, err := store.GrantXP(player, "k1", 140, "match_reward")
+	p, applied, err := store.GrantXP(ctx, player, "k1", 140, "match_reward")
 	record(p, applied, err)
 
-	p, applied, err = store.GrantXP(player, "k1", 140, "match_reward")
+	p, applied, err = store.GrantXP(ctx, player, "k1", 140, "match_reward")
 	record(p, applied, err)
 
-	p, applied, err = store.GrantXP(player, "k2", 900, "match_reward")
+	p, applied, err = store.GrantXP(ctx, player, "k2", 900, "match_reward")
 	record(p, applied, err)
 
-	p, applied, err = store.GrantXP(player, "", 10, "match_reward")
+	p, applied, err = store.GrantXP(ctx, player, "", 10, "match_reward")
 	record(p, applied, err)
 
-	p, applied, err = store.GrantXP(player, "k3", 0, "match_reward")
+	p, applied, err = store.GrantXP(ctx, player, "k3", 0, "match_reward")
 	record(p, applied, err)
 
-	p, err = store.Get(player)
+	p, err = store.Get(ctx, player)
 	record(p, false, err)
 
 	return out
@@ -138,7 +138,7 @@ func TestPGRejectsXPForUnknownPlayer(t *testing.T) {
 	defer pool.Close()
 
 	ghost := "p_ghost_" + strconv.FormatInt(time.Now().UnixNano(), 36)
-	_, _, err = progress.NewPG(pool).GrantXP(ghost, "k_ghost", 10, "match_reward")
+	_, _, err = progress.NewPG(pool).GrantXP(ctx, ghost, "k_ghost", 10, "match_reward")
 	if err == nil {
 		t.Fatal("granting xp to an unknown player should be refused")
 	}

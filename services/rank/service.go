@@ -5,6 +5,7 @@
 package rank
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -30,7 +31,9 @@ func NewWithStore(log *slog.Logger, store Store) *Service {
 // Rating returns a player's current rating on the default board. The
 // matchmaking service receives this as a lookup function so it never imports
 // this package directly.
-func (s *Service) Rating(playerID string) int64 { return s.store.RatingOf(DefaultBoard, playerID) }
+func (s *Service) Rating(ctx context.Context, playerID string) int64 {
+	return s.store.RatingOf(ctx, DefaultBoard, playerID)
+}
 
 // GetLeaderboardResponse is the leaderboard read model.
 type GetLeaderboardResponse struct {
@@ -82,7 +85,7 @@ func (s *Service) getLeaderboard(r *http.Request) (any, error) {
 		return nil, err
 	}
 	limit := 50
-	board, err := s.store.Top(httpx.Param(r, "board"), limit)
+	board, err := s.store.Top(r.Context(), httpx.Param(r, "board"), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +108,7 @@ func (s *Service) submitResult(r *http.Request) (any, error) {
 		return nil, apierr.Invalid("player_id is required").WithDetail("field", "player_id")
 	}
 	board := httpx.Param(r, "board")
-	rating, delta, applied, err := s.store.Apply(board, req.PlayerID, key, req.Won)
+	rating, delta, applied, err := s.store.Apply(r.Context(), board, req.PlayerID, key, req.Won)
 	if err != nil {
 		return nil, err
 	}
@@ -116,6 +119,6 @@ func (s *Service) submitResult(r *http.Request) (any, error) {
 
 // Apply updates a rating from an authoritative outcome. Shared by the HTTP
 // handler and the in-process match fan-out.
-func (s *Service) Apply(board, playerID, idempotencyKey string, won bool) (Rating, int64, bool, error) {
-	return s.store.Apply(board, playerID, idempotencyKey, won)
+func (s *Service) Apply(ctx context.Context, board, playerID, idempotencyKey string, won bool) (Rating, int64, bool, error) {
+	return s.store.Apply(ctx, board, playerID, idempotencyKey, won)
 }

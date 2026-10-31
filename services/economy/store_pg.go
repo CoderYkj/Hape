@@ -32,37 +32,37 @@ type PG struct {
 func NewPG(pool *pgxpool.Pool) *PG { return &PG{pool: pool} }
 
 // Wallet implements Store.
-func (s *PG) Wallet(playerID string) (Wallet, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), movementTimeout)
+func (s *PG) Wallet(ctx context.Context, playerID string) (Wallet, error) {
+	ctx, cancel := context.WithTimeout(ctx, movementTimeout)
 	defer cancel()
 	return s.wallet(ctx, s.pool, playerID)
 }
 
 // Grant implements Store.
-func (s *PG) Grant(playerID, idempotencyKey, currency string, amount int64, reason string) (Wallet, bool, error) {
+func (s *PG) Grant(ctx context.Context, playerID, idempotencyKey, currency string, amount int64, reason string) (Wallet, bool, error) {
 	if err := validateMovement(idempotencyKey, currency, amount); err != nil {
 		return Wallet{}, false, err
 	}
 	if reason == "" {
 		return Wallet{}, false, apierr.Invalid("reason is required").WithDetail("field", "reason")
 	}
-	return s.movement(playerID, idempotencyKey, currency, amount, reason)
+	return s.movement(ctx, playerID, idempotencyKey, currency, amount, reason)
 }
 
 // Spend implements Store.
-func (s *PG) Spend(playerID, idempotencyKey, currency string, amount int64, itemID string) (Wallet, bool, error) {
+func (s *PG) Spend(ctx context.Context, playerID, idempotencyKey, currency string, amount int64, itemID string) (Wallet, bool, error) {
 	if err := validateMovement(idempotencyKey, currency, amount); err != nil {
 		return Wallet{}, false, err
 	}
 	if itemID == "" {
 		return Wallet{}, false, apierr.Invalid("item_id is required").WithDetail("field", "item_id")
 	}
-	return s.movement(playerID, idempotencyKey, currency, -amount, "purchase:"+itemID)
+	return s.movement(ctx, playerID, idempotencyKey, currency, -amount, "purchase:"+itemID)
 }
 
 // Ledger implements Store.
-func (s *PG) Ledger(playerID string) ([]LedgerEntry, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), movementTimeout)
+func (s *PG) Ledger(ctx context.Context, playerID string) ([]LedgerEntry, error) {
+	ctx, cancel := context.WithTimeout(ctx, movementTimeout)
 	defer cancel()
 
 	rows, err := s.pool.Query(ctx,
@@ -104,8 +104,8 @@ func (s *PG) Ledger(playerID string) ([]LedgerEntry, error) {
 // The ordering is deliberate: the ledger row goes in first, because its unique
 // (player_id, idempotency_key) index is what makes a replay a no-op. A SELECT
 // "has this been applied?" check before the write would be a race, not a guard.
-func (s *PG) movement(playerID, idempotencyKey, currency string, delta int64, reason string) (Wallet, bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), movementTimeout)
+func (s *PG) movement(ctx context.Context, playerID, idempotencyKey, currency string, delta int64, reason string) (Wallet, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, movementTimeout)
 	defer cancel()
 
 	var (

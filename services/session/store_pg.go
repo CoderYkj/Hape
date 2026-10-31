@@ -30,8 +30,8 @@ type PG struct {
 func NewPG(pool *pgxpool.Pool) *PG { return &PG{pool: pool} }
 
 // Create implements Store.
-func (s *PG) Create(session Session) (Session, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) Create(ctx context.Context, session Session) (Session, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	if session.CreatedAt.IsZero() {
@@ -73,8 +73,8 @@ func (s *PG) Create(session Session) (Session, error) {
 }
 
 // Get implements Store.
-func (s *PG) Get(id string) (Session, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) Get(ctx context.Context, id string) (Session, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 	return s.get(ctx, s.pool, id, false)
 }
@@ -83,8 +83,8 @@ func (s *PG) Get(id string) (Session, error) {
 //
 // mutate runs against a locked snapshot. If it returns an error (an illegal state
 // transition), nothing is written and the transaction rolls back.
-func (s *PG) Update(id string, mutate func(*Session) error) (Session, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) Update(ctx context.Context, id string, mutate func(*Session) error) (Session, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	var result Session
@@ -125,8 +125,8 @@ func (s *PG) Update(id string, mutate func(*Session) error) (Session, error) {
 //
 // Only allocating and ready are swept: an in_progress match may legitimately be
 // long, and killing it is worse than paying for a leaked server.
-func (s *PG) ExpireStale(before time.Time) ([]Session, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) ExpireStale(ctx context.Context, before time.Time) ([]Session, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	// Parameters must start at $1 and stay contiguous: PostgreSQL cannot infer the
@@ -242,8 +242,8 @@ var _ Expirer = (*PG)(nil)
 // match_results is the report header (one row per result_id, unique by session);
 // match_player_results is the per-player detail. Both writes are idempotent: a
 // retried report is a no-op, not a duplicate audit trail.
-func (s *PG) RecordResult(match FinishedMatch) error {
-	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+func (s *PG) RecordResult(ctx context.Context, match FinishedMatch) error {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
 	finishedAt := match.FinishedAt

@@ -46,7 +46,7 @@ func TestStoresAgree(t *testing.T) {
 		{"postgres", session.NewPG(pool)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			created, err := tc.store.Create(session.Session{
+			created, err := tc.store.Create(ctx, session.Session{
 				ID:        "s_" + tc.name + "_" + suffix,
 				MatchID:   matchID,
 				State:     session.StateAllocating,
@@ -62,7 +62,7 @@ func TestStoresAgree(t *testing.T) {
 			}
 
 			// One session per match: the second create for the same match is refused.
-			if _, err := tc.store.Create(session.Session{
+			if _, err := tc.store.Create(ctx, session.Session{
 				ID:      "s_dup_" + tc.name + "_" + suffix,
 				MatchID: matchID,
 				State:   session.StateAllocating,
@@ -72,7 +72,7 @@ func TestStoresAgree(t *testing.T) {
 			}
 
 			// Illegal transition: allocating cannot jump straight to finished.
-			if _, err := tc.store.Update(created.ID, func(sp *session.Session) error {
+			if _, err := tc.store.Update(ctx, created.ID, func(sp *session.Session) error {
 				if !session.CanTransition(sp.State, session.StateFinished) {
 					return session.ErrInvalidTransition.WithDetail("from", sp.State)
 				}
@@ -83,7 +83,7 @@ func TestStoresAgree(t *testing.T) {
 			}
 
 			// Legal path: allocating -> ready -> finished with a result id.
-			readied, err := tc.store.Update(created.ID, func(sp *session.Session) error {
+			readied, err := tc.store.Update(ctx, created.ID, func(sp *session.Session) error {
 				sp.State = session.StateReady
 				sp.AllocationID = "alloc-1"
 				sp.Provider = "local"
@@ -100,7 +100,7 @@ func TestStoresAgree(t *testing.T) {
 				t.Fatalf("unexpected ready session: %+v", readied)
 			}
 
-			finished, err := tc.store.Update(created.ID, func(sp *session.Session) error {
+			finished, err := tc.store.Update(ctx, created.ID, func(sp *session.Session) error {
 				sp.State = session.StateFinished
 				sp.ResultID = "res_" + suffix
 				now := time.Now().UTC()
@@ -114,7 +114,7 @@ func TestStoresAgree(t *testing.T) {
 				t.Fatalf("unexpected finished session: %+v", finished)
 			}
 			// Read it back: Update's return value is not proof that it committed.
-			persisted, err := tc.store.Get(created.ID)
+			persisted, err := tc.store.Get(ctx, created.ID)
 			if err != nil {
 				t.Fatalf("get after finish: %v", err)
 			}
@@ -122,7 +122,7 @@ func TestStoresAgree(t *testing.T) {
 				t.Fatalf("finish did not persist: %+v", persisted)
 			}
 
-			if _, err := tc.store.Get("s_missing"); apierr.As(err).Code != apierr.CodeNotFound {
+			if _, err := tc.store.Get(ctx, "s_missing"); apierr.As(err).Code != apierr.CodeNotFound {
 				t.Fatalf("unknown session: code = %q, want not_found", apierr.As(err).Code)
 			}
 
@@ -143,10 +143,10 @@ func TestStoresAgree(t *testing.T) {
 				},
 				FinishedAt: time.Now().UTC(),
 			}
-			if err := recorder.RecordResult(report); err != nil {
+			if err := recorder.RecordResult(ctx, report); err != nil {
 				t.Fatalf("record result: %v", err)
 			}
-			if err := recorder.RecordResult(report); err != nil {
+			if err := recorder.RecordResult(ctx, report); err != nil {
 				t.Fatalf("record result replay: %v", err)
 			}
 			if tc.name == "postgres" {
@@ -167,12 +167,12 @@ func TestStoresAgree(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s store does not implement Expirer", tc.name)
 			}
-			if expired, err := expirer.ExpireStale(time.Now().Add(24 * time.Hour)); err != nil || len(expired) != 0 {
+			if expired, err := expirer.ExpireStale(ctx, time.Now().Add(24*time.Hour)); err != nil || len(expired) != 0 {
 				t.Fatalf("finished session was swept: %+v (err %v)", expired, err)
 			}
 
 			// An abandoned allocating session is swept into failed.
-			abandoned, err := tc.store.Create(session.Session{
+			abandoned, err := tc.store.Create(ctx, session.Session{
 				ID:        "s_stale_" + tc.name + "_" + suffix,
 				MatchID:   matchID + "_stale",
 				State:     session.StateAllocating,
@@ -186,14 +186,14 @@ func TestStoresAgree(t *testing.T) {
 				_, _ = pool.Exec(context.Background(), `DELETE FROM sessions WHERE match_id = $1`, matchID+"_stale")
 			})
 
-			expired, err := expirer.ExpireStale(time.Now())
+			expired, err := expirer.ExpireStale(ctx, time.Now())
 			if err != nil {
 				t.Fatalf("expire: %v", err)
 			}
 			if len(expired) != 1 || expired[0].ID != abandoned.ID {
 				t.Fatalf("swept %+v, want only the abandoned session", expired)
 			}
-			after, err := tc.store.Get(abandoned.ID)
+			after, err := tc.store.Get(ctx, abandoned.ID)
 			if err != nil {
 				t.Fatalf("get after sweep: %v", err)
 			}

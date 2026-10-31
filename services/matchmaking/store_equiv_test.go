@@ -54,7 +54,7 @@ func TestStoresAgree(t *testing.T) {
 		{"postgres", matchmaking.NewPG(pool)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			first, err := tc.store.Create(matchmaking.Ticket{PlayerID: players[0], Queue: queue, MMR: 1000})
+			first, err := tc.store.Create(ctx, matchmaking.Ticket{PlayerID: players[0], Queue: queue, MMR: 1000})
 			if err != nil {
 				t.Fatalf("enqueue: %v", err)
 			}
@@ -63,26 +63,26 @@ func TestStoresAgree(t *testing.T) {
 			}
 
 			// A second waiting ticket for the same player is refused, not merged.
-			if _, err := tc.store.Create(matchmaking.Ticket{PlayerID: players[0], Queue: queue, MMR: 1000}); err == nil {
+			if _, err := tc.store.Create(ctx, matchmaking.Ticket{PlayerID: players[0], Queue: queue, MMR: 1000}); err == nil {
 				t.Fatal("second waiting ticket should be refused")
 			}
 
-			if found, ok := tc.store.FindWaitingByPlayer(queue, players[0]); !ok || found.ID != first.ID {
+			if found, ok := tc.store.FindWaitingByPlayer(ctx, queue, players[0]); !ok || found.ID != first.ID {
 				t.Fatalf("FindWaitingByPlayer = (%v, %v), want the ticket just created", found.ID, ok)
 			}
-			if tc.store.Waiting(queue) != 1 {
-				t.Fatalf("waiting = %d, want 1", tc.store.Waiting(queue))
+			if tc.store.Waiting(ctx, queue) != 1 {
+				t.Fatalf("waiting = %d, want 1", tc.store.Waiting(ctx, queue))
 			}
 
 			// One player is not a match.
-			if _, err := tc.store.Pop(queue, 2, 200, "m_solo"); err == nil {
+			if _, err := tc.store.Pop(ctx, queue, 2, 200, "m_solo"); err == nil {
 				t.Fatal("popping a single waiting ticket must not form a match")
 			}
 
-			if _, err := tc.store.Create(matchmaking.Ticket{PlayerID: players[1], Queue: queue, MMR: 1050}); err != nil {
+			if _, err := tc.store.Create(ctx, matchmaking.Ticket{PlayerID: players[1], Queue: queue, MMR: 1050}); err != nil {
 				t.Fatalf("second player enqueue: %v", err)
 			}
-			popped, err := tc.store.Pop(queue, 2, 200, "m_pair")
+			popped, err := tc.store.Pop(ctx, queue, 2, 200, "m_pair")
 			if err != nil {
 				t.Fatalf("pop: %v", err)
 			}
@@ -95,13 +95,13 @@ func TestStoresAgree(t *testing.T) {
 				}
 			}
 
-			if tc.store.Waiting(queue) != 0 {
-				t.Fatalf("waiting after pop = %d, want 0", tc.store.Waiting(queue))
+			if tc.store.Waiting(ctx, queue) != 0 {
+				t.Fatalf("waiting after pop = %d, want 0", tc.store.Waiting(ctx, queue))
 			}
-			if _, err := tc.store.Pop(queue, 2, 200, "m_empty"); err == nil {
+			if _, err := tc.store.Pop(ctx, queue, 2, 200, "m_empty"); err == nil {
 				t.Fatal("popping an empty queue must fail")
 			}
-			if _, err := tc.store.Get("q_missing"); apierr.As(err).Code != apierr.CodeNotFound {
+			if _, err := tc.store.Get(ctx, "q_missing"); apierr.As(err).Code != apierr.CodeNotFound {
 				t.Fatalf("unknown ticket: code = %q, want not_found", apierr.As(err).Code)
 			}
 		})

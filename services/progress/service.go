@@ -5,6 +5,7 @@
 package progress
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -75,7 +76,7 @@ func (s *Service) get(r *http.Request) (any, error) {
 	if err := httpx.RequireSelf(r, playerID); err != nil {
 		return nil, err
 	}
-	player, err := s.store.Get(playerID)
+	player, err := s.store.Get(r.Context(), playerID)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +99,7 @@ func (s *Service) grantXP(r *http.Request) (any, error) {
 	if req.Reason == "" {
 		return nil, apierr.Invalid("reason is required").WithDetail("field", "reason")
 	}
-	player, applied, err := s.store.GrantXP(playerID, key, req.XP, req.Reason)
+	player, applied, err := s.store.GrantXP(r.Context(), playerID, key, req.XP, req.Reason)
 	if err != nil {
 		return nil, err
 	}
@@ -111,6 +112,6 @@ func (s *Service) grantXP(r *http.Request) (any, error) {
 // The HTTP handler and the in-process match fan-out call the same method, so
 // there is exactly one place where progression rules live. When the service is
 // split out, this becomes the HTTP call and the signature stays.
-func (s *Service) Grant(playerID, idempotencyKey string, xp int64, reason string) (Progress, bool, error) {
-	return s.store.GrantXP(playerID, idempotencyKey, xp, reason)
+func (s *Service) Grant(ctx context.Context, playerID, idempotencyKey string, xp int64, reason string) (Progress, bool, error) {
+	return s.store.GrantXP(ctx, playerID, idempotencyKey, xp, reason)
 }

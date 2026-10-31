@@ -57,6 +57,10 @@ tools/*          一次性工具（apigen、fakeds）
 
 ## 依赖政策
 
+- **`context.Context` 是每个 IO 方法的第一个参数**，命名 `ctx`；不要存进 struct、
+  不要用 `context.Background()` 在库代码里断链。内存实现接受它并忽略
+  （`_ context.Context`），这样接口对两种实现一致。SQL 实现用
+  `context.WithTimeout(ctx, ...)` 派生超时，让调用方的 deadline 生效。
 - **依赖最小化**。当前唯一第三方依赖是 `github.com/jackc/pgx/v5`（ADR 0006，仅出现在 `pkg/pg` 与 `services/*/store_pg.go`）。新增任何依赖必须先在 `.harness/adr/` 写一篇 ADR，说明：解决什么问题、维护状态、退出成本。
 - 不引入 ORM、DI 框架、web 框架；`net/http` + `log/slog` + 手写装配足够。
 

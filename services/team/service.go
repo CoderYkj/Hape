@@ -94,7 +94,7 @@ func (s *Service) create(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	created, err := s.store.Create(playerID, name)
+	created, err := s.store.Create(r.Context(), playerID, name)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +108,7 @@ func (s *Service) join(r *http.Request) (any, error) {
 		return nil, err
 	}
 	teamID := httpx.Param(r, "team_id")
-	joined, applied, err := s.store.Join(teamID, playerID)
+	joined, applied, err := s.store.Join(r.Context(), teamID, playerID)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ func (s *Service) get(r *http.Request) (any, error) {
 	if _, err := httpx.RequirePlayer(r); err != nil {
 		return nil, err
 	}
-	found, err := s.store.Get(httpx.Param(r, "team_id"))
+	found, err := s.store.Get(r.Context(), httpx.Param(r, "team_id"))
 	if err != nil {
 		return nil, err
 	}

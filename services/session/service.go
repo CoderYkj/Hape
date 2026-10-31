@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sync/atomic"
+	"strconv"
 	"time"
 
 	"gamebackend/pkg/api"
@@ -41,12 +41,12 @@ type FinishedMatch struct {
 
 // Service is the session domain service.
 type Service struct {
-	log    *slog.Logger
-	store  Store
-	alloc  battlealloc.Allocator
-	sink   ResultSink
-	serial atomic.Int64
-	now    func() time.Time
+	log   *slog.Logger
+	store Store
+	alloc battlealloc.Allocator
+	sink  ResultSink
+
+	now func() time.Time
 }
 
 // New builds the service. sink may be nil (fan-out disabled in tests).
@@ -176,8 +176,10 @@ func (s *Service) create(r *http.Request) (any, error) {
 		return nil, err
 	}
 
-	id := fmt.Sprintf("s_%d", s.serial.Add(1))
-	_, err := s.store.Create(Session{
+	// Time-based, not a process-local counter: with a persistent store, s_1 from
+	// the previous process is still on disk, and a counter restarts at 1.
+	id := "s_" + strconv.FormatInt(s.now().UnixNano(), 36)
+	_, err := s.store.Create(r.Context(), Session{
 		ID:        id,
 		MatchID:   req.MatchID,
 		State:     StateAllocating,
@@ -200,7 +202,7 @@ func (s *Service) create(r *http.Request) (any, error) {
 		MaxPlayers: len(req.Players),
 	})
 	if err != nil {
-		_, _ = s.store.Update(id, func(sp *Session) error {
+		_, _ = s.store.Update(r.Context(), id, func(sp *Session) error {
 			sp.State = StateFailed
 			return nil
 		})
@@ -208,7 +210,7 @@ func (s *Service) create(r *http.Request) (any, error) {
 		return nil, apierr.Unavailable("dedicated server allocation failed").WithCause(err)
 	}
 
-	updated, err := s.store.Update(id, func(sp *Session) error {
+	updated, err := s.store.Update(r.Context(), id, func(sp *Session) error {
 		sp.AllocationID = allocation.ID
 		sp.Provider = allocation.Provider
 		sp.Address = allocation.Address
@@ -233,7 +235,7 @@ func (s *Service) markReady(r *http.Request) (any, error) {
 		return nil, err
 	}
 
-	updated, err := s.store.Update(sessionID, func(sp *Session) error {
+	updated, err := s.store.Update(r.Context(), sessionID, func(sp *Session) error {
 		if !CanTransition(sp.State, StateReady) {
 			return ErrInvalidTransition.WithDetail("from", sp.State).WithDetail("to", StateReady)
 		}
@@ -274,7 +276,7 @@ func (s *Service) submitResult(r *http.Request) (any, error) {
 		return nil, apierr.Invalid("duration_seconds must not be negative").WithDetail("field", "duration_seconds")
 	}
 
-	current, err := s.store.Get(sessionID)
+	current, err := s.store.Get(r.Context(), sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +311,7 @@ func (s *Service) submitResult(r *http.Request) (any, error) {
 	// retries, the retry must find the same report on file. Recording is
 	// idempotent by result_id, so a duplicate is a no-op.
 	if recorder, ok := s.store.(ResultRecorder); ok {
-		if err := recorder.RecordResult(FinishedMatch{
+		if err := recorder.RecordResult(r.Context(), FinishedMatch{
 			SessionID:       sessionID,
 			MatchID:         current.MatchID,
 			ResultID:        req.ResultID,
@@ -341,7 +343,7 @@ func (s *Service) submitResult(r *http.Request) (any, error) {
 		}
 	}
 
-	updated, err := s.store.Update(sessionID, func(sp *Session) error {
+	updated, err := s.store.Update(r.Context(), sessionID, func(sp *Session) error {
 		sp.State = StateFinished
 		sp.ResultID = req.ResultID
 		now := s.now().UTC()
@@ -374,7 +376,7 @@ func (s *Service) submitResult(r *http.Request) (any, error) {
 // this player get 100 gold" is answered by the report. Without it, the ledger says
 // a match happened and nothing says what the match was.
 type ResultRecorder interface {
-	RecordResult(match FinishedMatch) error
+	RecordResult(ctx context.Context, match FinishedMatch) error
 }
 
 // StaleSession is one session the reconciler declared dead.
@@ -403,7 +405,7 @@ func (s *Service) ExpireStale(ctx context.Context, now time.Time, staleAfter tim
 		return nil, ErrNoExpirer
 	}
 
-	expired, err := expirer.ExpireStale(now.Add(-staleAfter))
+	expired, err := expirer.ExpireStale(ctx, now.Add(-staleAfter))
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +427,7 @@ func (s *Service) get(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	found, err := s.store.Get(httpx.Param(r, "session_id"))
+	found, err := s.store.Get(r.Context(), httpx.Param(r, "session_id"))
 	if err != nil {
 		return nil, err
 	}

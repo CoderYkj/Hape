@@ -5,10 +5,12 @@
 package matchmaking
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"gamebackend/pkg/api"
 	"gamebackend/pkg/apierr"
@@ -20,20 +22,19 @@ const DefaultMMRBand int64 = 200
 
 // RatingLookup returns a player's current rating. Injected by the platform so
 // this package never imports the rank service directly.
-type RatingLookup func(playerID string) int64
+type RatingLookup func(ctx context.Context, playerID string) int64
 
 // Service is the matchmaking domain service.
 type Service struct {
 	log     *slog.Logger
 	store   Store
 	ratings RatingLookup
-	serial  int64
 }
 
 // New builds the service. ratings may be nil (everyone starts at 1000).
 func New(log *slog.Logger, ratings RatingLookup) *Service {
 	if ratings == nil {
-		ratings = func(string) int64 { return 1000 }
+		ratings = func(context.Context, string) int64 { return 1000 }
 	}
 	return &Service{log: log, store: NewMemory(), ratings: ratings}
 }
@@ -41,7 +42,7 @@ func New(log *slog.Logger, ratings RatingLookup) *Service {
 // NewWithStore builds the service on a caller-supplied store.
 func NewWithStore(log *slog.Logger, store Store, ratings RatingLookup) *Service {
 	if ratings == nil {
-		ratings = func(string) int64 { return 1000 }
+		ratings = func(context.Context, string) int64 { return 1000 }
 	}
 	return &Service{log: log, store: store, ratings: ratings}
 }
@@ -124,15 +125,15 @@ func (s *Service) createTicket(r *http.Request) (any, error) {
 	if req.Queue == "" {
 		return nil, apierr.Invalid("queue is required").WithDetail("field", "queue")
 	}
-	if existing, ok := s.store.FindWaitingByPlayer(req.Queue, playerID); ok {
+	if existing, ok := s.store.FindWaitingByPlayer(r.Context(), req.Queue, playerID); ok {
 		return CreateTicketResponse{Ticket: existing}, nil
 	}
 
-	ticket, err := s.store.Create(Ticket{
+	ticket, err := s.store.Create(r.Context(), Ticket{
 		PlayerID: playerID,
 		Party:    req.Party,
 		Queue:    req.Queue,
-		MMR:      s.ratings(playerID),
+		MMR:      s.ratings(r.Context(), playerID),
 	})
 	if err != nil {
 		return nil, err
@@ -146,7 +147,7 @@ func (s *Service) getTicket(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	ticket, err := s.store.Get(httpx.Param(r, "ticket_id"))
+	ticket, err := s.store.Get(r.Context(), httpx.Param(r, "ticket_id"))
 	if err != nil {
 		return nil, err
 	}
@@ -169,9 +170,13 @@ func (s *Service) pop(r *http.Request) (any, error) {
 		return nil, apierr.Invalid("count must be between 2 and 10").WithDetail("field", "count")
 	}
 
-	s.serial++
-	matchID := "m_" + queue + "_" + strconv.FormatInt(s.serial, 36)
-	tickets, err := s.store.Pop(queue, req.Count, DefaultMMRBand, matchID)
+	// Time-based, not a process-local counter: with a persistent store the same
+	// (see spec 0003 section 6 - this exact bug was found by running twice)
+	// queue would mint m_ranked_1v1_1 again after a restart, and sessions_one_per_match
+	// would (correctly) refuse the second match. The counter is not a unique
+	// identifier, it is a convenience.
+	matchID := "m_" + queue + "_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	tickets, err := s.store.Pop(r.Context(), queue, req.Count, DefaultMMRBand, matchID)
 	if err != nil {
 		if errors.Is(err, ErrNoWaiting) {
 			return PopResponse{Matched: false}, nil

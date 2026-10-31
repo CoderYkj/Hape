@@ -1,6 +1,7 @@
 package rank
 
 import (
+	"context"
 	"sort"
 	"sync"
 	"time"
@@ -51,9 +52,9 @@ type Leaderboard struct {
 
 // Store is the persistence seam for ratings.
 type Store interface {
-	RatingOf(board, playerID string) int64
-	Apply(board, playerID, idempotencyKey string, won bool) (rating Rating, delta int64, applied bool, err error)
-	Top(board string, limit int) (Leaderboard, error)
+	RatingOf(ctx context.Context, board, playerID string) int64
+	Apply(ctx context.Context, board, playerID, idempotencyKey string, won bool) (rating Rating, delta int64, applied bool, err error)
+	Top(ctx context.Context, board string, limit int) (Leaderboard, error)
 }
 
 // Memory is the in-memory Store.
@@ -71,7 +72,7 @@ func NewMemory() *Memory {
 
 func key(board, playerID string) string { return board + "|" + playerID }
 
-func (m *Memory) RatingOf(board, playerID string) int64 {
+func (m *Memory) RatingOf(_ context.Context, board, playerID string) int64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if rating, ok := m.byKey[key(board, playerID)]; ok {
@@ -80,7 +81,7 @@ func (m *Memory) RatingOf(board, playerID string) int64 {
 	return DefaultRating
 }
 
-func (m *Memory) Apply(board, playerID, idempotencyKey string, won bool) (Rating, int64, bool, error) {
+func (m *Memory) Apply(_ context.Context, board, playerID, idempotencyKey string, won bool) (Rating, int64, bool, error) {
 	if idempotencyKey == "" {
 		return Rating{}, 0, false, apierr.Invalid("idempotency key is required")
 	}
@@ -114,7 +115,7 @@ func (m *Memory) Apply(board, playerID, idempotencyKey string, won bool) (Rating
 	return rating, delta, true, nil
 }
 
-func (m *Memory) Top(board string, limit int) (Leaderboard, error) {
+func (m *Memory) Top(_ context.Context, board string, limit int) (Leaderboard, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

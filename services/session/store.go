@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"sort"
 	"sync"
 	"time"
@@ -52,17 +53,17 @@ var ErrInvalidTransition = apierr.Precondition("invalid session state transition
 
 // Store is the persistence seam for sessions.
 type Store interface {
-	Create(session Session) (Session, error)
-	Get(id string) (Session, error)
+	Create(ctx context.Context, session Session) (Session, error)
+	Get(ctx context.Context, id string) (Session, error)
 	// Update applies mutate under a lock and persists the result. Returning an
 	// error from mutate aborts the write, which keeps the state machine atomic.
-	Update(id string, mutate func(*Session) error) (Session, error)
+	Update(ctx context.Context, id string, mutate func(*Session) error) (Session, error)
 }
 
 // RecordResult implements ResultRecorder. The memory store keeps the report in a
 // map: process-local, forgotten on restart, which is exactly why the SQL store
 // exists.
-func (m *Memory) RecordResult(match FinishedMatch) error {
+func (m *Memory) RecordResult(_ context.Context, match FinishedMatch) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, exists := m.results[match.ResultID]; exists {
@@ -81,7 +82,7 @@ func (m *Memory) RecordResult(match FinishedMatch) error {
 type Expirer interface {
 	// ExpireStale returns the sessions it failed, or an error. The error matters:
 	// a sweep that silently returns nothing looks identical to "nothing to do".
-	ExpireStale(before time.Time) ([]Session, error)
+	ExpireStale(ctx context.Context, before time.Time) ([]Session, error)
 }
 
 // Memory is the in-memory Store.
@@ -97,7 +98,7 @@ func NewMemory() *Memory {
 	return &Memory{byID: map[string]Session{}, byMatch: map[string]string{}, results: map[string]FinishedMatch{}}
 }
 
-func (m *Memory) Create(session Session) (Session, error) {
+func (m *Memory) Create(_ context.Context, session Session) (Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, exists := m.byID[session.ID]; exists {
@@ -114,7 +115,7 @@ func (m *Memory) Create(session Session) (Session, error) {
 	return session, nil
 }
 
-func (m *Memory) Get(id string) (Session, error) {
+func (m *Memory) Get(_ context.Context, id string) (Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	session, ok := m.byID[id]
@@ -124,7 +125,7 @@ func (m *Memory) Get(id string) (Session, error) {
 	return session, nil
 }
 
-func (m *Memory) Update(id string, mutate func(*Session) error) (Session, error) {
+func (m *Memory) Update(_ context.Context, id string, mutate func(*Session) error) (Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	session, ok := m.byID[id]
@@ -142,7 +143,7 @@ func (m *Memory) Update(id string, mutate func(*Session) error) (Session, error)
 // `before`, and returns them. in_progress is excluded on purpose: a legitimate
 // long match and an abandoned one are indistinguishable without a per-game
 // timeout, and killing a live match is worse than paying for a leaked one.
-func (m *Memory) ExpireStale(before time.Time) ([]Session, error) {
+func (m *Memory) ExpireStale(_ context.Context, before time.Time) ([]Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

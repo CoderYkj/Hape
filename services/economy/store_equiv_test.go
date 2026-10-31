@@ -2,6 +2,7 @@ package economy_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strconv"
 	"testing"
@@ -66,8 +67,8 @@ func TestStoresAgree(t *testing.T) {
 	mem := economy.NewMemory()
 	sqlStore := economy.NewPG(pool)
 
-	memOut := script(t, mem, player)
-	sqlOut := script(t, sqlStore, player)
+	memOut := script(t, ctx, mem, player)
+	sqlOut := script(t, ctx, sqlStore, player)
 
 	if len(memOut) != len(sqlOut) {
 		t.Fatalf("step count differs: memory=%d sql=%d", len(memOut), len(sqlOut))
@@ -93,11 +94,11 @@ func TestStoresAgree(t *testing.T) {
 
 	// The ledger is the audit trail; amounts, signs and reasons must match even
 	// though the two stores mint their own ids.
-	memLedger, err := mem.Ledger(player)
+	memLedger, err := mem.Ledger(ctx, player)
 	if err != nil {
 		t.Fatalf("memory ledger: %v", err)
 	}
-	sqlLedger, err := sqlStore.Ledger(player)
+	sqlLedger, err := sqlStore.Ledger(ctx, player)
 	if err != nil {
 		t.Fatalf("sql ledger: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestStoresAgree(t *testing.T) {
 }
 
 // script runs the same requests against one store and records what happened.
-func script(t *testing.T, store economy.Store, player string) []outcome {
+func script(t *testing.T, ctx context.Context, store economy.Store, player string) []outcome {
 	t.Helper()
 
 	var out []outcome
@@ -136,39 +137,39 @@ func script(t *testing.T, store economy.Store, player string) []outcome {
 		out = append(out, step)
 	}
 
-	wallet, err := store.Wallet(player)
+	wallet, err := store.Wallet(ctx, player)
 	if err != nil {
 		t.Fatalf("wallet: %v", err)
 	}
 	out = append(out, outcome{balances: wallet.Balances})
 
-	w, applied, err := store.Grant(player, "k1", economy.CurrencyGold, 100, "match_reward")
+	w, applied, err := store.Grant(ctx, player, "k1", economy.CurrencyGold, 100, "match_reward")
 	record(applied, w, err)
 
 	// Same key, same player: a replay, not a second payout.
-	w, applied, err = store.Grant(player, "k1", economy.CurrencyGold, 100, "match_reward")
+	w, applied, err = store.Grant(ctx, player, "k1", economy.CurrencyGold, 100, "match_reward")
 	record(applied, w, err)
 
-	w, applied, err = store.Spend(player, "k2", economy.CurrencyGold, 60, "skin-01")
+	w, applied, err = store.Spend(ctx, player, "k2", economy.CurrencyGold, 60, "skin-01")
 	record(applied, w, err)
 
 	// Spending currency the player has never held.
-	w, applied, err = store.Spend(player, "k3", economy.CurrencyGems, 100, "skin-02")
+	w, applied, err = store.Spend(ctx, player, "k3", economy.CurrencyGems, 100, "skin-02")
 	record(applied, w, err)
 
 	// Spending more than the balance.
-	w, applied, err = store.Spend(player, "k4", economy.CurrencyGold, 1000, "skin-03")
+	w, applied, err = store.Spend(ctx, player, "k4", economy.CurrencyGold, 1000, "skin-03")
 	record(applied, w, err)
 
 	// Invalid inputs must be refused before any store is touched.
-	w, applied, err = store.Grant(player, "", economy.CurrencyGold, 10, "match_reward")
+	w, applied, err = store.Grant(ctx, player, "", economy.CurrencyGold, 10, "match_reward")
 	record(applied, w, err)
-	w, applied, err = store.Grant(player, "k5", "dogecoin", 10, "match_reward")
+	w, applied, err = store.Grant(ctx, player, "k5", "dogecoin", 10, "match_reward")
 	record(applied, w, err)
-	w, applied, err = store.Grant(player, "k6", economy.CurrencyGold, 0, "match_reward")
+	w, applied, err = store.Grant(ctx, player, "k6", economy.CurrencyGold, 0, "match_reward")
 	record(applied, w, err)
 
-	w, applied, err = store.Grant(player, "k7", economy.CurrencyGold, 5, "match_reward")
+	w, applied, err = store.Grant(ctx, player, "k7", economy.CurrencyGold, 5, "match_reward")
 	record(applied, w, err)
 
 	return out
@@ -195,12 +196,38 @@ func TestPGRejectsMoneyForUnknownPlayer(t *testing.T) {
 
 	store := economy.NewPG(pool)
 	ghost := "p_ghost_" + strconv.FormatInt(time.Now().UnixNano(), 36)
-	_, _, err = store.Grant(ghost, "k_ghost", economy.CurrencyGold, 10, "match_reward")
+	_, _, err = store.Grant(ctx, ghost, "k_ghost", economy.CurrencyGold, 10, "match_reward")
 	if err == nil {
 		t.Fatal("granting money to a player that does not exist should be refused")
 	}
 	if code := apierr.As(err).Code; code != apierr.CodeInvalidArgument {
 		t.Fatalf("error code = %q, want invalid_argument (err: %v)", code, err)
+	}
+}
+
+// TestPGRespectsCancelledContext is the point of threading ctx through every
+// Store: an abandoned request must not keep a database connection busy.
+func TestPGRespectsCancelledContext(t *testing.T) {
+	dsn := os.Getenv("BACKEND_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set BACKEND_TEST_DATABASE_URL to run the PostgreSQL store tests")
+	}
+
+	pool, err := pg.Open(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer pool.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the client hung up before the query started
+
+	store := economy.NewPG(pool)
+	if _, err := store.Wallet(ctx, "p_cancelled"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Wallet with a cancelled context returned %v, want context.Canceled", err)
+	}
+	if _, _, err := store.Grant(ctx, "p_cancelled", "k", economy.CurrencyGold, 1, "reason"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Grant with a cancelled context returned %v, want context.Canceled", err)
 	}
 }
 

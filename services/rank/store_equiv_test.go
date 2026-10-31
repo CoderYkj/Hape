@@ -47,8 +47,8 @@ func TestStoresAgree(t *testing.T) {
 	mem := rank.NewMemory()
 	sqlStore := rank.NewPG(pool)
 
-	memOut := script(t, mem, board, player)
-	sqlOut := script(t, sqlStore, board, player)
+	memOut := script(t, ctx, mem, board, player)
+	sqlOut := script(t, ctx, sqlStore, board, player)
 
 	if len(memOut) != len(sqlOut) {
 		t.Fatalf("step count: memory=%d sql=%d", len(memOut), len(sqlOut))
@@ -60,11 +60,11 @@ func TestStoresAgree(t *testing.T) {
 		}
 	}
 
-	memBoard, err := mem.Top(board, 50)
+	memBoard, err := mem.Top(ctx, board, 50)
 	if err != nil {
 		t.Fatalf("memory leaderboard: %v", err)
 	}
-	sqlBoard, err := sqlStore.Top(board, 50)
+	sqlBoard, err := sqlStore.Top(ctx, board, 50)
 	if err != nil {
 		t.Fatalf("sql leaderboard: %v", err)
 	}
@@ -87,7 +87,7 @@ type outcome struct {
 	errCode apierr.Code
 }
 
-func script(t *testing.T, store rank.Store, board, player string) []outcome {
+func script(t *testing.T, ctx context.Context, store rank.Store, board, player string) []outcome {
 	t.Helper()
 	var out []outcome
 	record := func(r rank.Rating, delta int64, applied bool, err error) {
@@ -98,25 +98,25 @@ func script(t *testing.T, store rank.Store, board, player string) []outcome {
 		out = append(out, step)
 	}
 
-	record(rank.Rating{Rating: store.RatingOf(board, player)}, 0, false, nil)
+	record(rank.Rating{Rating: store.RatingOf(ctx, board, player)}, 0, false, nil)
 
-	r, delta, applied, err := store.Apply(board, player, "k1", true)
+	r, delta, applied, err := store.Apply(ctx, board, player, "k1", true)
 	record(r, delta, applied, err)
 
 	// Replay: no movement, applied=false.
-	r, delta, applied, err = store.Apply(board, player, "k1", true)
+	r, delta, applied, err = store.Apply(ctx, board, player, "k1", true)
 	record(r, delta, applied, err)
 
-	r, delta, applied, err = store.Apply(board, player, "k2", false)
+	r, delta, applied, err = store.Apply(ctx, board, player, "k2", false)
 	record(r, delta, applied, err)
 
-	r, delta, applied, err = store.Apply(board, player, "", true)
+	r, delta, applied, err = store.Apply(ctx, board, player, "", true)
 	record(r, delta, applied, err)
 
 	// Drive the player to the floor: 62 losses from ~1008 must clamp at MinRating.
 	for i := 0; i < 62; i++ {
 		key := "floor-" + strconv.Itoa(i)
-		r, delta, applied, err = store.Apply(board, player, key, false)
+		r, delta, applied, err = store.Apply(ctx, board, player, key, false)
 		if err != nil {
 			t.Fatalf("loss %d: %v", i, err)
 		}
@@ -142,7 +142,7 @@ func TestPGRejectsRatingForUnknownPlayer(t *testing.T) {
 	defer pool.Close()
 
 	ghost := "p_ghost_" + strconv.FormatInt(time.Now().UnixNano(), 36)
-	_, _, _, err = rank.NewPG(pool).Apply(rank.DefaultBoard, ghost, "k_ghost", true)
+	_, _, _, err = rank.NewPG(pool).Apply(ctx, rank.DefaultBoard, ghost, "k_ghost", true)
 	if err == nil {
 		t.Fatal("rating an unknown player should be refused")
 	}

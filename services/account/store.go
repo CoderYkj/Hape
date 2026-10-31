@@ -1,6 +1,7 @@
 package account
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,9 +27,9 @@ type Player struct {
 // SQL implementation replaces it without touching handlers, because handlers
 // only ever see this interface.
 type Store interface {
-	FindOrCreate(externalID, displayName string) (player Player, created bool, err error)
-	GetByID(id string) (Player, error)
-	UpdateDisplayName(id, displayName string) (Player, error)
+	FindOrCreate(ctx context.Context, externalID, displayName string) (player Player, created bool, err error)
+	GetByID(ctx context.Context, id string) (Player, error)
+	UpdateDisplayName(ctx context.Context, id, displayName string) (Player, error)
 }
 
 // Memory is the in-memory Store used by tests and local dev.
@@ -45,7 +46,7 @@ func NewMemory() *Memory {
 	return &Memory{byID: map[string]Player{}, byExternal: map[string]string{}, now: time.Now}
 }
 
-func (m *Memory) FindOrCreate(externalID, displayName string) (Player, bool, error) {
+func (m *Memory) FindOrCreate(_ context.Context, externalID, displayName string) (Player, bool, error) {
 	// Same guard as the SQL store: an empty external id would otherwise create an
 	// unauthenticatable account. Kept identical so the two stores agree.
 	if strings.TrimSpace(externalID) == "" {
@@ -74,7 +75,7 @@ func (m *Memory) FindOrCreate(externalID, displayName string) (Player, bool, err
 	return player, true, nil
 }
 
-func (m *Memory) GetByID(id string) (Player, error) {
+func (m *Memory) GetByID(_ context.Context, id string) (Player, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	player, ok := m.byID[id]
@@ -84,7 +85,7 @@ func (m *Memory) GetByID(id string) (Player, error) {
 	return player, nil
 }
 
-func (m *Memory) UpdateDisplayName(id, displayName string) (Player, error) {
+func (m *Memory) UpdateDisplayName(_ context.Context, id, displayName string) (Player, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	player, ok := m.byID[id]

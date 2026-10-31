@@ -106,7 +106,7 @@ func (s *Service) login(r *http.Request) (any, error) {
 		return nil, apierr.Invalid("external_id is required").WithDetail("field", "external_id")
 	}
 
-	player, created, err := s.store.FindOrCreate(externalID, strings.TrimSpace(req.DisplayName))
+	player, created, err := s.store.FindOrCreate(r.Context(), externalID, strings.TrimSpace(req.DisplayName))
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ func (s *Service) getPlayer(r *http.Request) (any, error) {
 	if err := httpx.RequireSelf(r, playerID); err != nil {
 		return nil, err
 	}
-	player, err := s.store.GetByID(playerID)
+	player, err := s.store.GetByID(r.Context(), playerID)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +139,7 @@ func (s *Service) updateProfile(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	player, err := s.store.UpdateDisplayName(playerID, name)
+	player, err := s.store.UpdateDisplayName(r.Context(), playerID, name)
 	if err != nil {
 		return nil, err
 	}

@@ -62,21 +62,23 @@ func (f *fakeSink) MatchFinished(context.Context, FinishedMatch) error {
 }
 
 type harness struct {
-	t    *testing.T
-	srv  *httptest.Server
-	app  *Service
-	auth string
+	t     *testing.T
+	srv   *httptest.Server
+	app   *Service
+	store Store
+	auth  string
 }
 
 func newHarness(t *testing.T, alloc battlealloc.Allocator, sink ResultSink) *harness {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	router := httpx.NewRouter("session", log, httpx.NewDevAuth(serviceToken))
-	app := NewWithStore(log, NewMemory(), alloc, sink)
+	store := NewMemory()
+	app := NewWithStore(log, store, alloc, sink)
 	app.Register(router)
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
-	return &harness{t: t, srv: server, app: app, auth: serviceToken}
+	return &harness{t: t, srv: server, app: app, store: store, auth: serviceToken}
 }
 
 // do issues one request and returns the status plus the decoded body (nil for
@@ -188,14 +190,28 @@ func TestAllocationFailureFailsTheSession(t *testing.T) {
 	}
 
 	// The session exists and is failed, so a client polling it sees the truth.
-	status, body = h.do(http.MethodGet, "/v1/session/sessions/s_1", nil, "dev-player-p_1")
+	// Its id is generated, so it is read from the in-memory store rather than
+	// assumed: with a persistent store a fixed id would also collide across runs.
+	memory, ok := h.store.(*Memory)
+	if !ok {
+		t.Fatalf("harness store is %T, want *Memory", h.store)
+	}
+	var sessionID string
+	for id := range memory.byID {
+		sessionID = id
+	}
+	if sessionID == "" {
+		t.Fatal("the failed session was not recorded")
+	}
+
+	status, body = h.do(http.MethodGet, "/v1/session/sessions/"+sessionID, nil, "dev-player-p_1")
 	h.expect(status, http.StatusOK, "polling a failed session")
 	if state, _ := nested(t, body, "session", "state").(string); state != StateFailed {
 		t.Fatalf("session state = %q, want failed", state)
 	}
 
 	// And it cannot be resurrected by a late ready call.
-	status, _ = h.do(http.MethodPost, "/v1/session/sessions/s_1/ready", map[string]any{}, h.auth)
+	status, _ = h.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/ready", map[string]any{}, h.auth)
 	h.expect(status, http.StatusPreconditionFailed, "ready after failure")
 }
 

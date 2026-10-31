@@ -1,6 +1,7 @@
 package economy
 
 import (
+	"context"
 	"strconv"
 	"sync"
 	"time"
@@ -42,10 +43,10 @@ type LedgerEntry struct {
 
 // Store is the persistence seam for the economy.
 type Store interface {
-	Wallet(playerID string) (Wallet, error)
-	Grant(playerID, idempotencyKey, currency string, amount int64, reason string) (Wallet, bool, error)
-	Spend(playerID, idempotencyKey, currency string, amount int64, itemID string) (Wallet, bool, error)
-	Ledger(playerID string) ([]LedgerEntry, error)
+	Wallet(ctx context.Context, playerID string) (Wallet, error)
+	Grant(ctx context.Context, playerID, idempotencyKey, currency string, amount int64, reason string) (Wallet, bool, error)
+	Spend(ctx context.Context, playerID, idempotencyKey, currency string, amount int64, itemID string) (Wallet, bool, error)
+	Ledger(ctx context.Context, playerID string) ([]LedgerEntry, error)
 }
 
 // Memory is the in-memory Store.
@@ -68,7 +69,7 @@ func NewMemory() *Memory {
 	}
 }
 
-func (m *Memory) Wallet(playerID string) (Wallet, error) {
+func (m *Memory) Wallet(_ context.Context, playerID string) (Wallet, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.walletLocked(playerID), nil
@@ -81,7 +82,7 @@ func (m *Memory) walletLocked(playerID string) Wallet {
 	return Wallet{PlayerID: playerID, Balances: map[string]int64{}, UpdatedAt: m.now().UTC()}
 }
 
-func (m *Memory) Grant(playerID, idempotencyKey, currency string, amount int64, reason string) (Wallet, bool, error) {
+func (m *Memory) Grant(_ context.Context, playerID, idempotencyKey, currency string, amount int64, reason string) (Wallet, bool, error) {
 	if err := validateMovement(idempotencyKey, currency, amount); err != nil {
 		return Wallet{}, false, err
 	}
@@ -104,7 +105,7 @@ func (m *Memory) Grant(playerID, idempotencyKey, currency string, amount int64, 
 	return wallet, true, nil
 }
 
-func (m *Memory) Spend(playerID, idempotencyKey, currency string, amount int64, itemID string) (Wallet, bool, error) {
+func (m *Memory) Spend(_ context.Context, playerID, idempotencyKey, currency string, amount int64, itemID string) (Wallet, bool, error) {
 	if err := validateMovement(idempotencyKey, currency, amount); err != nil {
 		return Wallet{}, false, err
 	}
@@ -134,7 +135,7 @@ func (m *Memory) Spend(playerID, idempotencyKey, currency string, amount int64, 
 	return wallet, true, nil
 }
 
-func (m *Memory) Ledger(playerID string) ([]LedgerEntry, error) {
+func (m *Memory) Ledger(_ context.Context, playerID string) ([]LedgerEntry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entries := m.ledger[playerID]

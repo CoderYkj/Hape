@@ -1,6 +1,7 @@
 package progress
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -22,8 +23,8 @@ type Progress struct {
 
 // Store is the persistence seam for progression.
 type Store interface {
-	Get(playerID string) (Progress, error)
-	GrantXP(playerID, idempotencyKey string, xp int64, reason string) (Progress, bool, error)
+	Get(ctx context.Context, playerID string) (Progress, error)
+	GrantXP(ctx context.Context, playerID, idempotencyKey string, xp int64, reason string) (Progress, bool, error)
 }
 
 // Memory is the in-memory Store.
@@ -39,7 +40,7 @@ func NewMemory() *Memory {
 	return &Memory{byPlayer: map[string]Progress{}, applied: map[string]Progress{}, now: time.Now}
 }
 
-func (m *Memory) Get(playerID string) (Progress, error) {
+func (m *Memory) Get(_ context.Context, playerID string) (Progress, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if player, ok := m.byPlayer[playerID]; ok {
@@ -49,7 +50,7 @@ func (m *Memory) Get(playerID string) (Progress, error) {
 	return Progress{PlayerID: playerID, Level: 1, Unlocks: []string{}}, nil
 }
 
-func (m *Memory) GrantXP(playerID, idempotencyKey string, xp int64, reason string) (Progress, bool, error) {
+func (m *Memory) GrantXP(_ context.Context, playerID, idempotencyKey string, xp int64, reason string) (Progress, bool, error) {
 	if idempotencyKey == "" {
 		return Progress{}, false, apierr.Invalid("idempotency key is required")
 	}

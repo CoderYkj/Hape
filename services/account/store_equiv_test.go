@@ -44,7 +44,7 @@ func TestStoresAgree(t *testing.T) {
 
 	for name, store := range map[string]account.Store{"memory": mem, "postgres": sqlStore} {
 		t.Run(name, func(t *testing.T) {
-			first, created, err := store.FindOrCreate(externalID, "Equiv")
+			first, created, err := store.FindOrCreate(ctx, externalID, "Equiv")
 			if err != nil {
 				t.Fatalf("first login: %v", err)
 			}
@@ -56,7 +56,7 @@ func TestStoresAgree(t *testing.T) {
 			}
 
 			// The same Nakama user logging in again must get the same player.
-			second, created, err := store.FindOrCreate(externalID, "Equiv")
+			second, created, err := store.FindOrCreate(ctx, externalID, "Equiv")
 			if err != nil {
 				t.Fatalf("second login: %v", err)
 			}
@@ -67,7 +67,7 @@ func TestStoresAgree(t *testing.T) {
 				t.Fatalf("second login returned a different player: %q vs %q", second.ID, first.ID)
 			}
 
-			read, err := store.GetByID(first.ID)
+			read, err := store.GetByID(ctx, first.ID)
 			if err != nil {
 				t.Fatalf("get: %v", err)
 			}
@@ -75,7 +75,7 @@ func TestStoresAgree(t *testing.T) {
 				t.Fatalf("external_id = %q, want %q", read.ExternalID, externalID)
 			}
 
-			renamed, err := store.UpdateDisplayName(first.ID, "Renamed")
+			renamed, err := store.UpdateDisplayName(ctx, first.ID, "Renamed")
 			if err != nil {
 				t.Fatalf("rename: %v", err)
 			}
@@ -87,10 +87,10 @@ func TestStoresAgree(t *testing.T) {
 			}
 
 			// Refusals must agree too.
-			if _, err := store.GetByID("p_missing"); apierr.As(err).Code != apierr.CodeNotFound {
+			if _, err := store.GetByID(ctx, "p_missing"); apierr.As(err).Code != apierr.CodeNotFound {
 				t.Fatalf("unknown player: code = %q, want not_found", apierr.As(err).Code)
 			}
-			if _, _, err := store.FindOrCreate("", "x"); apierr.As(err).Code != apierr.CodeInvalidArgument {
+			if _, _, err := store.FindOrCreate(ctx, "", "x"); apierr.As(err).Code != apierr.CodeInvalidArgument {
 				t.Fatalf("empty external_id: code = %q, want invalid_argument", apierr.As(err).Code)
 			}
 		})
