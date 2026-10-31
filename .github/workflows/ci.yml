@@ -82,7 +82,18 @@ jobs:
       - name: go test (race, with database)
         env:
           BACKEND_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/gamebackend?sslmode=disable
-        run: go test -race ./...
+        run: go test -race -v ./... | tee /tmp/go-test.log
+
+      # A green run is not proof that the database tests executed: they skip when
+      # BACKEND_TEST_DATABASE_URL is unset, and a skip looks like a pass. This
+      # turns "they were supposed to run" into an enforced fact.
+      - name: assert the database suites did not skip
+        run: |
+          if grep -E 'SKIP: (TestStoresAgree|TestSettlementIsAtomic|TestPGReports)' /tmp/go-test.log; then
+            echo "database-backed tests were skipped in CI; check BACKEND_TEST_DATABASE_URL"
+            exit 1
+          fi
+          grep -c 'PASS: TestStoresAgree' /tmp/go-test.log
 
       - name: contract drift
         run: |
