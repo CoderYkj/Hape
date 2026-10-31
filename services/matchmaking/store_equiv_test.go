@@ -67,8 +67,12 @@ func TestStoresAgree(t *testing.T) {
 				t.Fatal("second waiting ticket should be refused")
 			}
 
-			if found, ok := tc.store.FindWaitingByPlayer(ctx, queue, players[0]); !ok || found.ID != first.ID {
-				t.Fatalf("FindWaitingByPlayer = (%v, %v), want the ticket just created", found.ID, ok)
+			found, waiting, err := tc.store.FindWaitingByPlayer(ctx, queue, players[0])
+			if err != nil {
+				t.Fatalf("FindWaitingByPlayer: %v", err)
+			}
+			if !waiting || found.ID != first.ID {
+				t.Fatalf("FindWaitingByPlayer = (%v, %v), want the ticket just created", found.ID, waiting)
 			}
 			if tc.store.Waiting(ctx, queue) != 1 {
 				t.Fatalf("waiting = %d, want 1", tc.store.Waiting(ctx, queue))
@@ -105,5 +109,28 @@ func TestStoresAgree(t *testing.T) {
 				t.Fatalf("unknown ticket: code = %q, want not_found", apierr.As(err).Code)
 			}
 		})
+	}
+}
+
+// TestPGReportsQueueLookupErrors is the same proof for the queue lookup: a closed
+// pool must surface as an error, not as "you have no waiting ticket".
+func TestPGReportsQueueLookupErrors(t *testing.T) {
+	dsn := os.Getenv("BACKEND_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set BACKEND_TEST_DATABASE_URL to run the PostgreSQL store tests")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pool, err := pg.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	store := matchmaking.NewPG(pool)
+	pool.Close()
+
+	if _, found, err := store.FindWaitingByPlayer(ctx, "ranked_1v1", "p_anyone"); err == nil {
+		t.Fatalf("FindWaitingByPlayer returned (found=%v, nil) with a closed pool, want an error", found)
 	}
 }

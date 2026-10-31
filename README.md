@@ -117,6 +117,9 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
   就是这条约束的可执行版本。
 - 所有 `Store` 方法都带 `context.Context`（spec 0003）：请求取消会一路传到数据库，
   不会出现"客户端已断开、查询还在跑"。
+- 查询失败一律显式报错（spec 0004）：`rank.RatingOf` 与
+  `matchmaking.FindWaitingByPlayer` 不再静默降级为"默认 1000 分 / 没在排队"，
+  失败返回 503 可重试。
 - 分配器只有 `local` 实现（返回 `127.0.0.1:7777+n`）；厂商实现是返回
   `ErrNotConfigured` 的桩。
 - 单体单进程：7 个服务在同一个二进制里，按包边界隔离；`cmd/rank` 证明

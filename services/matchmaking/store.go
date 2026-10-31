@@ -34,7 +34,7 @@ type Store interface {
 	Get(ctx context.Context, id string) (Ticket, error)
 	// FindWaitingByPlayer returns the caller's waiting ticket in a queue, or
 	// ErrNoWaiting. It makes enqueue idempotent without an idempotency key.
-	FindWaitingByPlayer(ctx context.Context, queue, playerID string) (Ticket, bool)
+	FindWaitingByPlayer(ctx context.Context, queue, playerID string) (Ticket, bool, error)
 	Pop(ctx context.Context, queue string, count int, band int64, matchID string) ([]Ticket, error)
 	Waiting(ctx context.Context, queue string) int
 }
@@ -90,15 +90,15 @@ func (m *Memory) Get(_ context.Context, id string) (Ticket, error) {
 	return ticket, nil
 }
 
-func (m *Memory) FindWaitingByPlayer(_ context.Context, queue, playerID string) (Ticket, bool) {
+func (m *Memory) FindWaitingByPlayer(_ context.Context, queue, playerID string) (Ticket, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, id := range m.waiting[queue] {
 		if ticket := m.byID[id]; ticket.PlayerID == playerID {
-			return ticket, true
+			return ticket, true, nil
 		}
 	}
-	return Ticket{}, false
+	return Ticket{}, false, nil
 }
 
 func (m *Memory) Waiting(_ context.Context, queue string) int {

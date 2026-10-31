@@ -22,7 +22,7 @@ const DefaultMMRBand int64 = 200
 
 // RatingLookup returns a player's current rating. Injected by the platform so
 // this package never imports the rank service directly.
-type RatingLookup func(ctx context.Context, playerID string) int64
+type RatingLookup func(ctx context.Context, playerID string) (int64, error)
 
 // Service is the matchmaking domain service.
 type Service struct {
@@ -34,7 +34,7 @@ type Service struct {
 // New builds the service. ratings may be nil (everyone starts at 1000).
 func New(log *slog.Logger, ratings RatingLookup) *Service {
 	if ratings == nil {
-		ratings = func(context.Context, string) int64 { return 1000 }
+		ratings = func(context.Context, string) (int64, error) { return 1000, nil }
 	}
 	return &Service{log: log, store: NewMemory(), ratings: ratings}
 }
@@ -42,7 +42,7 @@ func New(log *slog.Logger, ratings RatingLookup) *Service {
 // NewWithStore builds the service on a caller-supplied store.
 func NewWithStore(log *slog.Logger, store Store, ratings RatingLookup) *Service {
 	if ratings == nil {
-		ratings = func(context.Context, string) int64 { return 1000 }
+		ratings = func(context.Context, string) (int64, error) { return 1000, nil }
 	}
 	return &Service{log: log, store: store, ratings: ratings}
 }
@@ -125,15 +125,27 @@ func (s *Service) createTicket(r *http.Request) (any, error) {
 	if req.Queue == "" {
 		return nil, apierr.Invalid("queue is required").WithDetail("field", "queue")
 	}
-	if existing, ok := s.store.FindWaitingByPlayer(r.Context(), req.Queue, playerID); ok {
+	existing, waiting, err := s.store.FindWaitingByPlayer(r.Context(), req.Queue, playerID)
+	if err != nil {
+		// Not "assume nothing is waiting": that would create a second ticket and
+		// turn a database blip into a confusing 409 for the player.
+		return nil, apierr.Unavailable("queue lookup failed, retry").WithCause(err)
+	}
+	if waiting {
 		return CreateTicketResponse{Ticket: existing}, nil
+	}
+
+	mmr, err := s.ratings(r.Context(), playerID)
+	if err != nil {
+		// Enqueueing at a guessed MMR would poison match quality silently.
+		return nil, apierr.Unavailable("rating lookup failed, retry").WithCause(err)
 	}
 
 	ticket, err := s.store.Create(r.Context(), Ticket{
 		PlayerID: playerID,
 		Party:    req.Party,
 		Queue:    req.Queue,
-		MMR:      s.ratings(r.Context(), playerID),
+		MMR:      mmr,
 	})
 	if err != nil {
 		return nil, err

@@ -65,9 +65,9 @@ handler、契约层、`platform` 的服务装配都不 import 驱动类型。
    有测试钉住：已取消的 ctx 下查询立刻返回 `context.Canceled`。
 2. **跨域结算不是单个事务**。`platform/sink.go` 依次写进度、经济、排行，各自幂等，
    但不是一个事务；中途失败靠"同一 `result_id` 重试"收敛，而不是原子性。
-3. **两个无 error 返回的查询会静默降级**：`rank.RatingOf` 出错退化为默认分，
-   `matchmaking.FindWaitingByPlayer` 出错当作"没在排队"。数据库那边的唯一索引是
-   真正的兜底，但调用方拿不到错误。
+3. ~~**两个无 error 返回的查询会静默降级**~~ → **已还**（spec 0004）：
+   `rank.RatingOf` 与 `matchmaking.FindWaitingByPlayer` 都返回 error，调用方把失败
+   变成 `503 unavailable`，不再替玩家猜 MMR、也不再把"查不到"当成"没在排队"。
 3. **账号与经济必须先一起迁**。`ledger_entries.player_id` 有外键指向 `players`，
    只迁经济不迁账号 → 发钱直接失败。这是刻意的数据完整性，不是耦合失误。
 

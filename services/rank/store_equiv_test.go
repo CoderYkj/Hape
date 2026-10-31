@@ -98,7 +98,11 @@ func script(t *testing.T, ctx context.Context, store rank.Store, board, player s
 		out = append(out, step)
 	}
 
-	record(rank.Rating{Rating: store.RatingOf(ctx, board, player)}, 0, false, nil)
+	current, err := store.RatingOf(ctx, board, player)
+	if err != nil {
+		t.Fatalf("RatingOf: %v", err)
+	}
+	record(rank.Rating{Rating: current}, 0, false, nil)
 
 	r, delta, applied, err := store.Apply(ctx, board, player, "k1", true)
 	record(r, delta, applied, err)
@@ -148,5 +152,28 @@ func TestPGRejectsRatingForUnknownPlayer(t *testing.T) {
 	}
 	if code := apierr.As(err).Code; code != apierr.CodeInvalidArgument {
 		t.Fatalf("code = %q, want invalid_argument (err: %v)", code, err)
+	}
+}
+
+// TestPGReportsLookupErrors proves the debt is paid: with a closed pool, RatingOf
+// returns an error instead of quietly answering DefaultRating.
+func TestPGReportsLookupErrors(t *testing.T) {
+	dsn := os.Getenv("BACKEND_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set BACKEND_TEST_DATABASE_URL to run the PostgreSQL store tests")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pool, err := pg.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	store := rank.NewPG(pool)
+	pool.Close() // the connection is gone; a silent fallback would hide it
+
+	if rating, err := store.RatingOf(ctx, rank.DefaultBoard, "p_anyone"); err == nil {
+		t.Fatalf("RatingOf returned (%d, nil) with a closed pool, want an error", rating)
 	}
 }

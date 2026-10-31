@@ -2,6 +2,7 @@ package rank
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -28,11 +29,10 @@ func NewPG(pool *pgxpool.Pool) *PG { return &PG{pool: pool} }
 
 // RatingOf implements Store.
 //
-// The interface has no error return because matchmaking calls it on the hot path
-// and can live with the default. A database failure therefore degrades to
-// DefaultRating rather than failing the match: documented in ADR 0006 as debt to
-// fix when Store gains a context and an error.
-func (s *PG) RatingOf(ctx context.Context, board, playerID string) int64 {
+// It reports errors instead of degrading to DefaultRating: silently queueing a
+// player at 1000 because the database blinked would poison match quality, and
+// nobody would ever notice.
+func (s *PG) RatingOf(ctx context.Context, board, playerID string) (int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
@@ -40,10 +40,14 @@ func (s *PG) RatingOf(ctx context.Context, board, playerID string) int64 {
 	err := s.pool.QueryRow(ctx,
 		`SELECT rating FROM player_ratings WHERE board = $1 AND player_id = $2`,
 		board, playerID).Scan(&rating)
-	if err != nil {
-		return DefaultRating
+	if errors.Is(err, pgx.ErrNoRows) {
+		// A player who never played is not an error: they start at the default.
+		return DefaultRating, nil
 	}
-	return rating
+	if err != nil {
+		return 0, err
+	}
+	return rating, nil
 }
 
 // Apply implements Store.

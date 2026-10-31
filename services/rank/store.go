@@ -52,7 +52,7 @@ type Leaderboard struct {
 
 // Store is the persistence seam for ratings.
 type Store interface {
-	RatingOf(ctx context.Context, board, playerID string) int64
+	RatingOf(ctx context.Context, board, playerID string) (int64, error)
 	Apply(ctx context.Context, board, playerID, idempotencyKey string, won bool) (rating Rating, delta int64, applied bool, err error)
 	Top(ctx context.Context, board string, limit int) (Leaderboard, error)
 }
@@ -72,13 +72,13 @@ func NewMemory() *Memory {
 
 func key(board, playerID string) string { return board + "|" + playerID }
 
-func (m *Memory) RatingOf(_ context.Context, board, playerID string) int64 {
+func (m *Memory) RatingOf(_ context.Context, board, playerID string) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if rating, ok := m.byKey[key(board, playerID)]; ok {
-		return rating.Rating
+		return rating.Rating, nil
 	}
-	return DefaultRating
+	return DefaultRating, nil
 }
 
 func (m *Memory) Apply(_ context.Context, board, playerID, idempotencyKey string, won bool) (Rating, int64, bool, error) {

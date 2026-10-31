@@ -31,7 +31,7 @@ func NewWithStore(log *slog.Logger, store Store) *Service {
 // Rating returns a player's current rating on the default board. The
 // matchmaking service receives this as a lookup function so it never imports
 // this package directly.
-func (s *Service) Rating(ctx context.Context, playerID string) int64 {
+func (s *Service) Rating(ctx context.Context, playerID string) (int64, error) {
 	return s.store.RatingOf(ctx, DefaultBoard, playerID)
 }
 

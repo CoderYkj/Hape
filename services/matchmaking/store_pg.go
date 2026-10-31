@@ -76,10 +76,10 @@ func (s *PG) Get(ctx context.Context, id string) (Ticket, error) {
 
 // FindWaitingByPlayer implements Store.
 //
-// No error return: the interface treats "lookup failed" as "nothing waiting", and
-// the create path then hits the unique index, which is the real guard. Documented
-// as debt in ADR 0006.
-func (s *PG) FindWaitingByPlayer(ctx context.Context, queue, playerID string) (Ticket, bool) {
+// It reports errors: treating "lookup failed" as "nothing waiting" would create a
+// second ticket and rely on the unique index to save us, which turns a database
+// blip into a confusing 409 for the player.
+func (s *PG) FindWaitingByPlayer(ctx context.Context, queue, playerID string) (Ticket, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
@@ -89,10 +89,13 @@ func (s *PG) FindWaitingByPlayer(ctx context.Context, queue, playerID string) (T
 		  WHERE queue = $1 AND player_id = $2 AND status = $3
 		  ORDER BY created_at DESC
 		  LIMIT 1`, queue, playerID, StatusWaiting))
-	if err != nil {
-		return Ticket{}, false
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Ticket{}, false, nil
 	}
-	return ticket, true
+	if err != nil {
+		return Ticket{}, false, err
+	}
+	return ticket, true, nil
 }
 
 // Waiting implements Store.
