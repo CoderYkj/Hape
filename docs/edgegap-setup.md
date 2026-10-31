@@ -3,6 +3,22 @@
 > 这份文档回答两件事：**你在 Edgegap 控制台要点什么**、**后端要怎么配**。
 > 第 1–4 节是你在网页上做的，第 5–7 节是代码与配置。文末有「需要你给我的东西」清单。
 
+## 现状（对着真实账号核实过）
+
+适配器已实现（`pkg/battlealloc/edgegap.go`），契约测试 10 条全绿。对着 live API 核实：
+
+| 项 | 已核实的事实 |
+|---|---|
+| 认证头 | `Authorization: Token <token>` —— **不是** `Bearer`，裸 token 会 401 |
+| 应用 / 版本 | `Hape` / `demo-app-lyra`（镜像 `edgegap/sample-unreal-5.5.4-lyra`） |
+| 端口 | `gameport` = **7777/UDP** |
+| 版本兜底 | `max_duration=60` 分钟、`req_cpu=1536`、`req_memory=3072`、`time_to_deploy=300s` |
+| 套餐限额 | **同时只允许 1 个 active deployment** |
+| 当前阻塞 | 账号里已有 1 台在跑（`5b710ceea710`），所以 `POST /v1/deploy` 返回 403「plan allows only 1 active deployments」 |
+
+也就是说：**认证、端点、应用/版本/端口读取都已验证；"分配一台并拿到地址"这一步
+还没成功过**，原因是并发额度，不是代码。
+
 ## 0. 为什么是 Edgegap
 
 三家托管厂商里，GameLift 要先建 fleet、Agones 要先有 K8s 集群，而 Edgegap 是
@@ -130,9 +146,17 @@ DELETE /v1/stop/{request_id}
 1. **契约测试（不需要你的账号）**：用 `httptest` 假服务模仿 `/v1/deploy`、`/v1/status`、
    `/v1/stop` 的响应，断言我们的适配器解析正确、超时与错误分类正确。
    这一步我随时可以做，且会进 CI。
-2. **真机冒烟（需要 token）**：`BACKEND_ALLOCATOR=edgegap` 起平台，跑一次
-   `go run ./tools/fakeds`——它会真的申请一台、等就绪、然后**马上释放**。
-   费用大约是一次几分钟的实例，记得看账单确认已停止。
+2. **真机冒烟（需要 token）**：先单独验证适配器，不要拉整条对局链：
+
+   ```bash
+   EDGEGAP_TOKEN=... EDGEGAP_APP=Hape EDGEGAP_VERSION=demo-app-lyra \
+     go run ./tools/edgegap-check -timeout 5m
+   ```
+
+   它会分配一台、打印 `address:port`、**立刻释放**。成功输出形如
+   `READY in 42s: id=abc123 address=1.2.3.4:31234` 后跟 `released`。
+   想让它留着观察就加 `-keep`（会在日志里明确提示仍在计费）。
+   确认适配器没问题后，再 `BACKEND_ALLOCATOR=edgegap` 起平台跑 `fakeds`。
 3. **观察**：日志里应有 `session allocating`（带 provider=edgegap, address）与
    结算后的 release；数据库 `sessions.provider='edgegap'`。
 
@@ -150,7 +174,10 @@ DELETE /v1/stop/{request_id}
 
 ## 9. 已知风险
 
-- **配额**：免费额度有限，自动化测试不要对着真 API 跑循环。
+- **配额**：免费套餐只允许 **1 个并发部署**。冒烟前先确认没有别的部署在跑
+  （`GET /v1/deployments`），否则会拿到 403「plan allows only 1 active deployments」——
+  这是容量问题，适配器会把它分类为可重试，而不是 token 错误。
+- **自动化测试不要对着真 API 跑循环**：契约测试用假服务，免费。
 - **镜像拉取失败**：私有 registry 需要 Edgegap 侧的拉取凭据，首次部署常见失败原因是这个。
 - **超时**：托管分配常在 20–90s 量级，客户端需要有"准备中"的 UI（`docs/ue5-ds-integration.md` 已写）。
 - **协议细节以官方文档为准**：本文的字段名来自 Edgegap 官方 OpenAPI 镜像

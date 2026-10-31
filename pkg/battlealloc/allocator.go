@@ -18,6 +18,14 @@ import (
 // ErrNotConfigured is returned by adapters that are declared but not wired yet.
 var ErrNotConfigured = errors.New("battle allocator: provider not configured")
 
+// ErrRetryable marks a failure worth retrying: rate limiting, 5xx, a network blip.
+// ErrPermanent marks one where a retry would fail identically and burn quota
+// (rejected token, missing application, malformed request).
+var (
+	ErrRetryable = errors.New("battlealloc: retryable failure")
+	ErrPermanent = errors.New("battlealloc: permanent failure")
+)
+
 // Request asks for one dedicated server instance.
 type Request struct {
 	SessionID  string
@@ -26,7 +34,10 @@ type Request struct {
 	Region     string
 	Map        string
 	MaxPlayers int
-	Meta       map[string]string
+	// IPs are the players' addresses, used by providers that pick a nearby edge
+	// location. Optional: an empty list means "provider decides".
+	IPs  []string
+	Meta map[string]string
 }
 
 // Allocation is a granted dedicated server.

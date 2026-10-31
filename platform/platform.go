@@ -46,6 +46,11 @@ type Config struct {
 	JWTKey string
 	// JWTIssuer, when set, is checked against the token's `iss`.
 	JWTIssuer string
+	// Edgegap credentials, used only when Allocator is "edgegap".
+	EdgegapToken   string
+	EdgegapApp     string
+	EdgegapVersion string
+	EdgegapBaseURL string
 	// DatabaseURL, when set, switches the economy store to PostgreSQL. Empty
 	// keeps the in-memory store, which is what tests and a bare `go run` use.
 	//
@@ -88,6 +93,21 @@ func New(cfg Config) (*Platform, error) {
 	}
 
 	alloc := battlealloc.New(cfg.Allocator)
+	if cfg.Allocator == "edgegap" {
+		edgegap, err := battlealloc.NewEdgegap(battlealloc.EdgegapConfig{
+			Token:   cfg.EdgegapToken,
+			AppName: cfg.EdgegapApp,
+			Version: cfg.EdgegapVersion,
+			BaseURL: cfg.EdgegapBaseURL,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("platform: edgegap allocator: %w", err)
+		}
+		alloc = edgegap
+		log.Info("allocator selected", "provider", "edgegap", "app", cfg.EdgegapApp)
+	} else {
+		log.Info("allocator selected", "provider", alloc.Provider())
+	}
 
 	staleAfter := cfg.SessionStaleAfter
 	if staleAfter <= 0 {

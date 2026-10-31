@@ -141,7 +141,7 @@ sequenceDiagram
 |---|---|---|---|
 | M0 | 垂直切片：一场对局跑通全链路（内存存储 + local allocator） | ✅ 完成 | spec 0001 |
 | M1 | Postgres 持久化：7/7 域落库、单事务结算、迁移 + 约束探针 | ✅ 完成 | spec 0002 / 0005、ADR 0006 / 0007 |
-| M2 | 真实托管分配器（先接一家）+ per-allocation token + 厂商侧确认回收 | 未开始（需厂商账号与配额；Edgegap 的接入步骤见 `docs/edgegap-setup.md`） | ADR 0003、90 文档 |
+| M2 | 真实托管分配器（先接一家）+ per-allocation token + 厂商侧确认回收 | 进行中：Edgegap 适配器完成、契约测试全绿、live API 已核实；真机分配待套餐腾出并发名额 | spec 0007、`docs/edgegap-setup.md` |
 | M3 | Nakama 落地：真实登录 → `account.login`，RPC 桥接跑通 | 未开始（需联网拉 `nakama-common` + 本地 Nakama 栈） | ADR 0001、`nakama/modules` |
 | M4 | 按热点拆服务；结算扇出改 outbox（**强制**，单事务在拆分后不成立） | 未开始（前置 M2/M3） | ADR 0005、ADR 0007 |
 | M5 | 可观测性与容量：指标落地、压测、SLO、僵尸会话告警 | 未开始（前置有真实流量） | 95 文档 |

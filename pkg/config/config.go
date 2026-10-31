@@ -23,6 +23,10 @@ type Config struct {
 	JWTKey       string // Nakama session encryption key; required when DevAuth is off
 	JWTIssuer    string // optional `iss` check
 	Allocator    string // local | gamelift | edgegap | agones
+	EdgegapToken string
+	EdgegapApp   string
+	EdgegapVer   string
+	EdgegapURL   string
 	DatabaseURL  string // empty in v0: stores are in memory
 	BatchRegions []string
 
@@ -56,6 +60,10 @@ func Load(service, defaultAddr string) (Config, error) {
 		JWTKey:            os.Getenv("BACKEND_JWT_KEY"),
 		JWTIssuer:         os.Getenv("BACKEND_JWT_ISSUER"),
 		Allocator:         envOr("BACKEND_ALLOCATOR", "local"),
+		EdgegapToken:      os.Getenv("BACKEND_EDGEGAP_TOKEN"),
+		EdgegapApp:        envOr("BACKEND_EDGEGAP_APP", ""),
+		EdgegapVer:        os.Getenv("BACKEND_EDGEGAP_VERSION"),
+		EdgegapURL:        os.Getenv("BACKEND_EDGEGAP_BASE_URL"),
 		DatabaseURL:       os.Getenv("BACKEND_DATABASE_URL"),
 		BatchRegions:      splitList(envOr("BACKEND_REGIONS", "local")),
 		ReconcileInterval: reconcile,
@@ -81,6 +89,12 @@ func (c Config) Validate() error {
 	}
 	if !c.DevAuth && c.JWTKey == "" {
 		return fmt.Errorf("BACKEND_DEV_AUTH=false requires BACKEND_JWT_KEY (Nakama session encryption key)")
+	}
+	if c.Allocator == "edgegap" && c.EdgegapToken == "" {
+		return fmt.Errorf("BACKEND_ALLOCATOR=edgegap requires BACKEND_EDGEGAP_TOKEN")
+	}
+	if c.Allocator == "edgegap" && c.EdgegapApp == "" {
+		return fmt.Errorf("BACKEND_ALLOCATOR=edgegap requires BACKEND_EDGEGAP_APP")
 	}
 	if c.ReconcileInterval < 0 {
 		return fmt.Errorf("BACKEND_RECONCILE_INTERVAL must not be negative, got %s", c.ReconcileInterval)
