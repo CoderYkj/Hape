@@ -44,6 +44,8 @@ func run() error {
 		EdgegapApp:        cfg.EdgegapApp,
 		EdgegapVersion:    cfg.EdgegapVer,
 		EdgegapBaseURL:    cfg.EdgegapURL,
+		EdgegapLat:        cfg.EdgegapLat,
+		EdgegapLon:        cfg.EdgegapLon,
 		DatabaseURL:       cfg.DatabaseURL,
 		ReconcileInterval: cfg.ReconcileInterval,
 		SessionStaleAfter: cfg.SessionStaleAfter,

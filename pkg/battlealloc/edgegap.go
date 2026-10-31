@@ -28,6 +28,8 @@ import (
 // cost a 401 round trip to discover, so it is written down here.
 type Edgegap struct {
 	token     string
+	latitude  *float64
+	longitude *float64
 	app       string
 	version   string
 	baseURL   string
@@ -60,6 +62,11 @@ type EdgegapConfig struct {
 	PortName  string
 	PortProto string
 	PortNum   int
+	// Latitude/Longitude are the fallback location centroid. Edgegap refuses a
+	// deployment with no placement hint at all, so when the caller has no player IPs
+	// we send this instead of failing. Set both or neither.
+	Latitude  *float64
+	Longitude *float64
 	Now       func() time.Time
 }
 
@@ -95,8 +102,14 @@ func NewEdgegap(cfg EdgegapConfig) (*Edgegap, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	// Both coordinates or none: a half-configured centroid is a typo, not a choice.
+	if (cfg.Latitude == nil) != (cfg.Longitude == nil) {
+		return nil, errors.New("battlealloc: edgegap latitude and longitude must be set together")
+	}
 	return &Edgegap{
 		token:     cfg.Token,
+		latitude:  cfg.Latitude,
+		longitude: cfg.Longitude,
 		app:       cfg.AppName,
 		version:   cfg.Version,
 		baseURL:   strings.TrimRight(cfg.BaseURL, "/"),
@@ -221,9 +234,21 @@ func (e *Edgegap) deploy(ctx context.Context, req Request) (string, error) {
 	if e.version != "" {
 		body["version_name"] = e.version
 	}
-	// Player IPs make Edgegap pick a nearby edge location (geo selection).
-	if len(req.IPs) > 0 {
+	// Placement: Edgegap refuses a deployment that carries no hint at all
+	// ("You must specify at least ip_list, geo_ip_list, a valid location or use
+	// filters"). Player IPs are the better hint - they pick an edge near the actual
+	// players - and the configured centroid is the fallback.
+	switch {
+	case len(req.IPs) > 0:
 		body["ip_list"] = req.IPs
+	case e.latitude != nil && e.longitude != nil:
+		body["location"] = map[string]any{
+			"latitude":  *e.latitude,
+			"longitude": *e.longitude,
+		}
+	default:
+		return "", fmt.Errorf("%w: edgegap needs player IPs (Request.IPs) or a configured "+
+			"location (BACKEND_EDGEGAP_LATITUDE/LONGITUDE)", ErrPermanent)
 	}
 
 	raw, err := json.Marshal(body)

@@ -1,6 +1,6 @@
 # 0007 - Edgegap 分配器
 
-- 状态：in progress（适配器与契约测试完成；**真机分配被套餐限额挡住**）
+- 状态：implemented（真机分配 + 释放成功：`READY in 3s` → `172.237.14.252:32719` → 已 TERMINATED）
 - 日期：2026-01-01
 - 关联 ADR：0003（分配器抽象）、0007（结算事务）
 - 涉及：`pkg/battlealloc`（新增 `edgegap.go` + 错误分类）、`pkg/config`、`platform`、
@@ -41,6 +41,7 @@
 | 端口 | `gameport` = **7777/UDP**，`to_check: true` |
 | 版本参数 | `max_duration=60`（分钟，厂商侧兜底）、`req_cpu=1536`、`req_memory=3072`、`time_to_deploy=300s` |
 | 套餐限额 | **同时只允许 1 个 active deployment** |
+| 放置提示 | **必填其一**：`ip_list` / `geo_ip_list` / `location{lat,lon}` / `filters`。都没有 → 400「You must specify at least ip_list, geo_ip_list, a valid location or use filters」 |
 
 ## 4. 实现要点
 
@@ -60,8 +61,9 @@
 | 层 | 用例 |
 |---|---|
 | 契约（`httptest` 假服务，10 条） | 正常分配（含 env/ip_list/version 透传）、FQDN 回退、端口优先级、部署报错后停止、超时后停止、403 两种含义、状态读取重试、Release 幂等三态、缺配置 |
-| 真机（live API） | 认证头、端点、应用/版本/端口读取 **已核实**；`POST /v1/deploy` 返回 403「plan allows only 1 active deployments」→ **分配未成功** |
-| 待做 | 释放那 1 个占位部署后，用 `go run ./tools/edgegap-check` 跑一次完整分配 + 释放 |
+| 真机（live API） | 认证头、端点、应用/版本/端口读取 **已核实**；403 并发限额、400 缺放置提示两次失败都被修掉 |
+| 真机成功路径 | `go run ./tools/edgegap-check -lat 31.23 -lon 121.47` → `READY in 3s`、`172.237.14.252:32719`、释放后状态 `TERMINATED`、部署列表归零 |
+| 仍未确认 | `RUNTIME_TOKEN` 是否真的出现在**容器内**环境（API 接受了 `env_vars`，但 DS 是 UE5 Lyra，不会打印它） |
 
 ## 6. 回滚
 

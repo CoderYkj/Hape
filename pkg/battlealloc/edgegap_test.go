@@ -112,6 +112,9 @@ func newAdapter(t *testing.T, fake *fakeEdgegap, mutate func(*battlealloc.Edgega
 	server := httptest.NewServer(fake.handler())
 	t.Cleanup(server.Close)
 
+	// Default coordinates so tests that are not about placement do not have to think
+	// about it (Edgegap refuses a deployment with no placement hint at all).
+	lat, lon := 31.23, 121.47
 	cfg := battlealloc.EdgegapConfig{
 		Token:        "test-token",
 		AppName:      "Hape",
@@ -119,6 +122,8 @@ func newAdapter(t *testing.T, fake *fakeEdgegap, mutate func(*battlealloc.Edgega
 		BaseURL:      server.URL,
 		PollInterval: time.Millisecond,
 		ReadyTimeout: 2 * time.Second,
+		Latitude:     &lat,
+		Longitude:    &lon,
 	}
 	if mutate != nil {
 		mutate(&cfg)
@@ -178,6 +183,67 @@ func TestEdgegapAllocatesAReadyDeployment(t *testing.T) {
 		if auth != "Token test-token" {
 			t.Fatalf("Authorization = %q, want \"Token test-token\"", auth)
 		}
+	}
+}
+
+// TestEdgegapPlacementHints pins the real API constraint: a deployment with no
+// placement hint is refused ("You must specify at least ip_list, geo_ip_list, a
+// valid location or use filters"). Player IPs win; the configured centroid is the
+// fallback; neither is a permanent error we raise before spending a request.
+func TestEdgegapPlacementHints(t *testing.T) {
+	fake := &fakeEdgegap{statusReplies: []map[string]any{readyStatus()}}
+	lat, lon := 31.23, 121.47
+	adapter := newAdapter(t, fake, func(c *battlealloc.EdgegapConfig) {
+		c.Latitude, c.Longitude = &lat, &lon
+	})
+	if _, err := adapter.Allocate(context.Background(), battlealloc.Request{SessionID: "s_1"}); err != nil {
+		t.Fatalf("Allocate with a configured location: %v", err)
+	}
+	location, ok := fake.deployBody["location"].(map[string]any)
+	if !ok {
+		t.Fatalf("deploy body has no location: %v", fake.deployBody)
+	}
+	if location["latitude"] != 31.23 || location["longitude"] != 121.47 {
+		t.Fatalf("location = %v", location)
+	}
+	if _, hasIPs := fake.deployBody["ip_list"]; hasIPs {
+		t.Fatalf("ip_list must not be sent when there are no player IPs: %v", fake.deployBody)
+	}
+
+	// Player IPs beat the centroid when both are available.
+	fake = &fakeEdgegap{statusReplies: []map[string]any{readyStatus()}}
+	adapter = newAdapter(t, fake, func(c *battlealloc.EdgegapConfig) {
+		c.Latitude, c.Longitude = &lat, &lon
+	})
+	if _, err := adapter.Allocate(context.Background(), battlealloc.Request{
+		SessionID: "s_1", IPs: []string{"198.51.100.9"},
+	}); err != nil {
+		t.Fatalf("Allocate with player IPs: %v", err)
+	}
+	if _, hasIPs := fake.deployBody["ip_list"]; !hasIPs {
+		t.Fatalf("ip_list missing: %v", fake.deployBody)
+	}
+	if _, hasLocation := fake.deployBody["location"]; hasLocation {
+		t.Fatalf("location must not be sent when player IPs exist: %v", fake.deployBody)
+	}
+
+	// No hint at all: refuse before calling the API.
+	fake = &fakeEdgegap{statusReplies: []map[string]any{readyStatus()}}
+	adapter = newAdapter(t, fake, func(c *battlealloc.EdgegapConfig) {
+		c.Latitude, c.Longitude = nil, nil
+	})
+	if _, err := adapter.Allocate(context.Background(), battlealloc.Request{SessionID: "s_1"}); !errors.Is(err, battlealloc.ErrPermanent) {
+		t.Fatalf("err = %v, want ErrPermanent", err)
+	}
+	if len(fake.recorded()) != 0 {
+		t.Fatalf("no request should be sent without a placement hint, got %v", fake.recorded())
+	}
+
+	// A half-configured centroid is a typo, not a default.
+	if _, err := battlealloc.NewEdgegap(battlealloc.EdgegapConfig{
+		Token: "t", AppName: "a", Latitude: &lat,
+	}); err == nil {
+		t.Fatal("latitude without longitude must be refused")
 	}
 }
 

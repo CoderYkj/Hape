@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -28,11 +29,27 @@ func main() {
 	}
 }
 
+// envFloat reads an optional float flag default from the environment.
+func envFloat(key string, fallback float64) float64 {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
 func run() error {
 	token := flag.String("token", os.Getenv("EDGEGAP_TOKEN"), "Edgegap API token")
 	app := flag.String("app", os.Getenv("EDGEGAP_APP"), "Edgegap application name")
 	version := flag.String("version", os.Getenv("EDGEGAP_VERSION"), "Edgegap application version (empty = latest)")
 	timeout := flag.Duration("timeout", 4*time.Minute, "how long to wait for the instance to be ready")
+	lat := flag.Float64("lat", envFloat("EDGEGAP_LAT", 0), "location latitude (fallback when no player IPs)")
+	lon := flag.Float64("lon", envFloat("EDGEGAP_LON", 0), "location longitude")
+	ipHint := flag.String("ip", os.Getenv("EDGEGAP_IP"), "player IP to place the instance near (preferred over lat/lon)")
 	keep := flag.Bool("keep", false, "leave the deployment running (it will be billed and auto-expire)")
 	flag.Parse()
 
@@ -40,13 +57,17 @@ func run() error {
 		return errors.New("EDGEGAP_TOKEN and EDGEGAP_APP are required")
 	}
 
-	allocator, err := battlealloc.NewEdgegap(battlealloc.EdgegapConfig{
+	cfg := battlealloc.EdgegapConfig{
 		Token:        *token,
 		AppName:      *app,
 		Version:      *version,
 		ReadyTimeout: *timeout,
 		PollInterval: 2 * time.Second,
-	})
+	}
+	if *lat != 0 && *lon != 0 {
+		cfg.Latitude, cfg.Longitude = lat, lon
+	}
+	allocator, err := battlealloc.NewEdgegap(cfg)
 	if err != nil {
 		return err
 	}
@@ -59,11 +80,11 @@ func run() error {
 	fmt.Printf("allocating %s/%s for session %s (timeout %s)\n", *app, *version, sessionID, *timeout)
 
 	started := time.Now()
-	allocation, err := allocator.Allocate(ctx, battlealloc.Request{
-		SessionID: sessionID,
-		MatchID:   "smoke-match",
-		Queue:     "smoke",
-	})
+	req := battlealloc.Request{SessionID: sessionID, MatchID: "smoke-match", Queue: "smoke"}
+	if *ipHint != "" {
+		req.IPs = []string{*ipHint}
+	}
+	allocation, err := allocator.Allocate(ctx, req)
 	if err != nil {
 		return fmt.Errorf("allocate: %w", err)
 	}

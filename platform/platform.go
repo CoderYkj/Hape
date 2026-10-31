@@ -51,6 +51,9 @@ type Config struct {
 	EdgegapApp     string
 	EdgegapVersion string
 	EdgegapBaseURL string
+	// EdgegapLat/Lon are the fallback placement centroid (0,0 = unset).
+	EdgegapLat float64
+	EdgegapLon float64
 	// DatabaseURL, when set, switches the economy store to PostgreSQL. Empty
 	// keeps the in-memory store, which is what tests and a bare `go run` use.
 	//
@@ -94,12 +97,18 @@ func New(cfg Config) (*Platform, error) {
 
 	alloc := battlealloc.New(cfg.Allocator)
 	if cfg.Allocator == "edgegap" {
-		edgegap, err := battlealloc.NewEdgegap(battlealloc.EdgegapConfig{
+		edgegapCfg := battlealloc.EdgegapConfig{
 			Token:   cfg.EdgegapToken,
 			AppName: cfg.EdgegapApp,
 			Version: cfg.EdgegapVersion,
 			BaseURL: cfg.EdgegapBaseURL,
-		})
+		}
+		// A centroid is optional: without it, every allocation must carry player IPs.
+		if cfg.EdgegapLat != 0 && cfg.EdgegapLon != 0 {
+			lat, lon := cfg.EdgegapLat, cfg.EdgegapLon
+			edgegapCfg.Latitude, edgegapCfg.Longitude = &lat, &lon
+		}
+		edgegap, err := battlealloc.NewEdgegap(edgegapCfg)
 		if err != nil {
 			return nil, fmt.Errorf("platform: edgegap allocator: %w", err)
 		}

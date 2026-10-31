@@ -7,6 +7,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,6 +28,8 @@ type Config struct {
 	EdgegapApp   string
 	EdgegapVer   string
 	EdgegapURL   string
+	EdgegapLat   float64
+	EdgegapLon   float64
 	DatabaseURL  string // empty in v0: stores are in memory
 	BatchRegions []string
 
@@ -64,6 +67,8 @@ func Load(service, defaultAddr string) (Config, error) {
 		EdgegapApp:        envOr("BACKEND_EDGEGAP_APP", ""),
 		EdgegapVer:        os.Getenv("BACKEND_EDGEGAP_VERSION"),
 		EdgegapURL:        os.Getenv("BACKEND_EDGEGAP_BASE_URL"),
+		EdgegapLat:        floatOr("BACKEND_EDGEGAP_LATITUDE", 0),
+		EdgegapLon:        floatOr("BACKEND_EDGEGAP_LONGITUDE", 0),
 		DatabaseURL:       os.Getenv("BACKEND_DATABASE_URL"),
 		BatchRegions:      splitList(envOr("BACKEND_REGIONS", "local")),
 		ReconcileInterval: reconcile,
@@ -126,6 +131,20 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// floatOr parses an optional float; a malformed value falls back rather than
+// failing startup, because a bad coordinate only matters when it is used.
+func floatOr(key string, fallback float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func splitList(v string) []string {

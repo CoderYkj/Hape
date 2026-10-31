@@ -100,7 +100,11 @@ BACKEND_BASE_URL=http://backend:8080 \
 | `BACKEND_SERVICE_TOKEN` | 空 | 服务间 token；关闭 dev auth 时必填（服务调用仍用它，不用 JWT） |
 | `BACKEND_JWT_KEY` | 空 | Nakama 的 session 加密密钥（HS256）；`BACKEND_DEV_AUTH=false` 时必填 |
 | `BACKEND_JWT_ISSUER` | 空 | 非空时校验 token 的 `iss`（Nakama 默认发 `nakama`） |
-| `BACKEND_ALLOCATOR` | `local` | `local` / `gamelift` / `edgegap` / `agones`；后三者是返回 `ErrNotConfigured` 的桩 |
+| `BACKEND_ALLOCATOR` | `local` | `local` / `edgegap`（已实现）/ `gamelift`、`agones`（仍是桩） |
+| `BACKEND_EDGEGAP_TOKEN` | 空 | Edgegap API token；`BACKEND_ALLOCATOR=edgegap` 时必填 |
+| `BACKEND_EDGEGAP_APP` | 空 | 应用名（当前 `Hape`） |
+| `BACKEND_EDGEGAP_VERSION` | 空 | 版本名（当前 `demo-app-lyra`）；空 = 最新版本 |
+| `BACKEND_EDGEGAP_LATITUDE` / `_LONGITUDE` | 0 | 没有玩家 IP 时的放置坐标；两者必须同时给 |
 | `BACKEND_DATABASE_URL` | 空 | 非空时**全部七个域**走 Postgres；空则全部内存（重启即丢） |
 | `BACKEND_REGIONS` | `local` | 逗号分隔的区域列表 |
 | `BACKEND_RECONCILE_INTERVAL` | `0`（关闭） | 超时会话清理的周期，如 `30s`；格式错误启动即失败 |

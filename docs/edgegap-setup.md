@@ -14,10 +14,21 @@
 | 端口 | `gameport` = **7777/UDP** |
 | 版本兜底 | `max_duration=60` 分钟、`req_cpu=1536`、`req_memory=3072`、`time_to_deploy=300s` |
 | 套餐限额 | **同时只允许 1 个 active deployment** |
-| 当前阻塞 | 账号里已有 1 台在跑（`5b710ceea710`），所以 `POST /v1/deploy` 返回 403「plan allows only 1 active deployments」 |
+| 放置提示 | **必填其一**：`ip_list` / `location{lat,lon}` / filters。我们的适配器：有玩家 IP 用 IP，否则用配置的坐标 |
+| 并发限额 | **1 台**。冒烟前先确认没有在跑的部署（`GET /v1/deployments`） |
 
-也就是说：**认证、端点、应用/版本/端口读取都已验证；"分配一台并拿到地址"这一步
-还没成功过**，原因是并发额度，不是代码。
+**已跑通（2026-01-01）**：
+
+```text
+allocating Hape/demo-app-lyra for session smoke-...
+READY in 3s: id=799a98c234f1 address=172.237.14.252:32719
+released; nothing should be billing for this deployment
+（随后 GET /v1/status/799a98c234f1 → Status.TERMINATED，deployments 列表归零）
+```
+
+仍**未确认**的一项：`RUNTIME_TOKEN` 是否真的出现在容器内环境。API 接受了
+`env_vars`（`is_hidden: true`），但样例镜像是 UE5 Lyra DS，不会把它打印出来；
+要确认得换成我们自己的 DS 镜像打一行日志。
 
 ## 0. 为什么是 Edgegap
 
