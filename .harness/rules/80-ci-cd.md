@@ -20,6 +20,10 @@
 - 镜像必须能 `docker run` 后 `/healthz` 200（Dockerfile 里 `HEALTHCHECK` 指向它）。
 - 不把 `api/openapi/*` 之外的生成物提交进仓库。
 
+**现状**：以上是目标，不是事实。仓库里没有 registry，`ci.yml` 只镜像 `verify`
+的五个步骤、**不构建镜像**；`Dockerfile` 也从未被 `docker build` 过。
+第一次真正构建与运行按 `docs/deploy.md` 走，别假设 CI 产出过镜像。
+
 ## 环境与升级
 
 | 环境 | 用途 | 规则 |
@@ -27,6 +31,10 @@
 | dev | 本地/共享开发 | 可用 dev auth，可内存存储 |
 | staging | 预发验收 | 关闭 dev auth，接真实 Nakama 与真实托管服 |
 | prod | 线上 | 关闭 dev auth，服务 token 来自 secret manager |
+
+关闭 dev auth 的前提是**有真实认证器**（Nakama JWT 校验，M3）。在那之前
+`BACKEND_DEV_AUTH=false` 会让平台拒绝启动——这是有意的硬失败，不是 bug：
+宁可起不来，也不要拿 dev bearer token 上预发。
 
 Agent 边界：**不得**执行任何 staging/prod 部署命令。只允许本地构建与本地运行。
 
@@ -45,3 +53,5 @@ Agent 边界：**不得**执行任何 staging/prod 部署命令。只允许本�
 - [ ] 新增环境变量已在 `pkg/config` 与文档中登记
 - [ ] 回滚方案明确（上一个镜像 tag + 数据兼容性）
 - [ ] 没有新增裸密钥
+- [ ] 镜像 tag 是 git sha 或语义版本，不是 `latest`
+- [ ] 目标环境 `/healthz` 与 `/readyz` 都返回 200（`/metrics` 有请求计数）

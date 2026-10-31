@@ -33,6 +33,7 @@ make verify                       # Linux / CI
 | 新人 | 本文件 -> `docs/architecture.md` -> `docs/runbook-local-dev.md` |
 | 改接口的人 | `docs/api-contract.md` + `.harness/rules/30-api-contract.md` |
 | 接战斗服的人 | `docs/ue5-ds-integration.md` + `.harness/rules/90-battle-integration.md` |
+| 要部署的人 | `docs/deploy.md`（镜像 / compose / 环境变量 / 探针 / 回滚） |
 
 ## 三条不可协商
 
@@ -55,8 +56,10 @@ tools/          apigen(生成 OpenAPI) / fakeds(假战斗服)
 api/openapi/    生成的接口契约（勿手改）
 db/migrations/  Postgres schema 设计（M2 目标，v0 未接线）
 nakama/         Nakama Go 模块（RPC 桥接，未验证）
-deploy/         docker-compose（未验证）
-docs/           架构、契约、UE5 对接、本地运行手册
+deploy/         docker-compose：postgres + backend + nakama（未验证）
+Dockerfile      多阶段构建，alpine + 非 root 静态二进制（未验证）
+.dockerignore   构建上下文收敛到 Go 源码（刻意不含 .git）
+docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 .harness/       规则 / 规格模板 / ADR
 ```
 
@@ -71,7 +74,8 @@ docs/           架构、契约、UE5 对接、本地运行手册
 
 **未验证**（本机缺 docker / buf / make，且未接真实厂商）：
 
-- `deploy/docker-compose.yml`：Nakama + Postgres 编排，没起过
+- `Dockerfile` / `.dockerignore` / `deploy/docker-compose.yml`（含 `backend` 服务）：
+  本机没有 Docker，`docker build` 与 `compose up` 都没跑过；详见 `docs/deploy.md`
 - `nakama/modules`：独立 Go module，`nakama-common` 版本号为占位，
   没编译过，没跑过
 - `db/migrations/0001_init.sql`：没有 Postgres 实例，未执行

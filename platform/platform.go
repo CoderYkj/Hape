@@ -35,6 +35,11 @@ type Config struct {
 	ServiceToken string
 	Allocator    string
 	Logger       *slog.Logger
+	// Authenticator overrides the development authenticator. Production must
+	// inject one: DevAuth is a local-development shim that trusts a bearer
+	// string, and a server that silently falls back to it is worse than one
+	// that refuses to start.
+	Authenticator httpx.Authenticator
 }
 
 // Platform is the wired application.
@@ -62,7 +67,18 @@ func New(cfg Config) (*Platform, error) {
 		return nil, fmt.Errorf("platform: refusing to start in prod with dev auth")
 	}
 
-	router := httpx.NewRouter("platform", log, httpx.NewDevAuth(cfg.ServiceToken))
+	// Two distinct mistakes, two distinct errors: asking for non-dev auth and
+	// giving nothing to replace it with, versus asking for prod plus dev auth.
+	auth := cfg.Authenticator
+	if auth == nil {
+		if !cfg.DevAuth {
+			return nil, fmt.Errorf("platform: dev auth is disabled and no production " +
+				"Authenticator was injected (see ADR 0001 / M3)")
+		}
+		auth = httpx.NewDevAuth(cfg.ServiceToken)
+	}
+
+	router := httpx.NewRouter("platform", log, auth)
 	alloc := battlealloc.New(cfg.Allocator)
 
 	p := &Platform{log: log, router: router, alloc: alloc}

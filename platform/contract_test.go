@@ -3,10 +3,13 @@ package platform_test
 import (
 	"io"
 	"log/slog"
+	"net/http"
 	"strings"
 	"testing"
 
 	"gamebackend/pkg/api"
+	"gamebackend/pkg/apierr"
+	"gamebackend/pkg/httpx"
 	"gamebackend/platform"
 )
 
@@ -81,4 +84,50 @@ func TestServiceOpsRequireServiceAuth(t *testing.T) {
 			}
 		}
 	}
+}
+
+// rejectAll is a stand-in for "the real authenticator, not yet written": it
+// authenticates nobody, but it proves the injection point works.
+type rejectAll struct{}
+
+func (rejectAll) Player(*http.Request) (httpx.Principal, error) {
+	return httpx.Principal{}, apierr.Unauthenticated("production authenticator not implemented")
+}
+
+func (rejectAll) Service(*http.Request) (httpx.Principal, error) {
+	return httpx.Principal{}, apierr.Unauthenticated("production authenticator not implemented")
+}
+
+// TestPlatformRefusesToStartWithoutAnAuthenticator is the deployment guard:
+// BACKEND_DEV_AUTH=false without a real authenticator must fail at startup, not
+// serve dev bearer tokens in staging or prod.
+func TestPlatformRefusesToStartWithoutAnAuthenticator(t *testing.T) {
+	_, err := platform.New(platform.Config{
+		Env:       "staging",
+		DevAuth:   false,
+		Allocator: "local",
+		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err == nil {
+		t.Fatal("platform started with dev auth disabled and no authenticator injected")
+	}
+	if !strings.Contains(err.Error(), "Authenticator") {
+		t.Fatalf("error = %v, want it to mention the missing Authenticator", err)
+	}
+}
+
+// TestPlatformAcceptsAnInjectedAuthenticator keeps that guard from turning into
+// a dead end: the seam has to actually work.
+func TestPlatformAcceptsAnInjectedAuthenticator(t *testing.T) {
+	app, err := platform.New(platform.Config{
+		Env:           "staging",
+		DevAuth:       false,
+		Allocator:     "local",
+		Authenticator: rejectAll{},
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatalf("platform.New with an injected authenticator: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
 }

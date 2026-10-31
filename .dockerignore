@@ -1,0 +1,20 @@
+# Build context is the repository root. Keep it to what `go build ./cmd/platform`
+# actually needs: a smaller context is a faster build, and not shipping .git is
+# also why the Dockerfile passes -buildvcs=false.
+.git
+.github
+.gitignore
+.gitattributes
+.harness
+docs
+deploy
+nakama
+db
+scripts
+*.md
+Dockerfile
+.dockerignore
+.editorconfig
+Makefile
+api
+e2e

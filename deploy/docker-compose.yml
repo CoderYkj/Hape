@@ -1,13 +1,18 @@
-# Local development stack: Postgres + Nakama + the Go backend.
+# Local development stack: Postgres + Nakama + (optionally) the Go backend.
 #
-# NOT VERIFIED: this file was written on a machine without Docker. Treat it as
-# a starting point and expect to adjust image tags and Nakama flags.
+# NOT VERIFIED: written on a machine with no Docker, so no version of this file
+# has ever been brought up. Expect to adjust image tags and Nakama flags.
+#
+# Two ways to run the backend:
+#
+#   host       go run ./cmd/platform          # fast reload, no image build
+#   container  docker compose -f deploy/docker-compose.yml up -d --build backend
+#
+# Nakama reaches the backend through BACKEND_BASE_URL. The default below assumes
+# the backend runs on the host; when it runs in this stack, export
+# BACKEND_BASE_URL=http://backend:8080 before `up`.
 #
 #   docker compose -f deploy/docker-compose.yml up -d postgres nakama
-#   go run ./cmd/platform          # the backend runs on the host for fast reload
-#
-# The backend is intentionally NOT in this stack by default: during early
-# development you want `go run` + hot restarts, not an image build per change.
 
 name: gamebackend
 
@@ -28,6 +33,31 @@ services:
       timeout: 3s
       retries: 20
 
+  # The backend keeps its data in memory in v0, so it deliberately does NOT
+  # depend on postgres yet. M1 adds the SQL stores and turns this into
+  # depends_on: postgres (condition: service_healthy) plus BACKEND_DATABASE_URL.
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: gamebackend:local
+    environment:
+      BACKEND_ENV: dev
+      BACKEND_ADDR: 0.0.0.0:8080
+      BACKEND_DEV_AUTH: "true"
+      BACKEND_SERVICE_TOKEN: dev-service
+      BACKEND_ALLOCATOR: local
+      LOG_LEVEL: info
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
   nakama:
     image: heroiclabs/nakama:${NAKAMA_VERSION:-3.22.0}
     depends_on:
@@ -45,7 +75,7 @@ services:
         --runtime.path /nakama/data/modules
     environment:
       # The plugin reads these to reach the Go backend.
-      BACKEND_BASE_URL: http://host.docker.internal:8080
+      BACKEND_BASE_URL: ${BACKEND_BASE_URL:-http://host.docker.internal:8080}
       BACKEND_SERVICE_TOKEN: dev-service
     extra_hosts:
       - "host.docker.internal:host-gateway"
