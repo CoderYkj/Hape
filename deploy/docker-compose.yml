@@ -1,0 +1,62 @@
+# Local development stack: Postgres + Nakama + the Go backend.
+#
+# NOT VERIFIED: this file was written on a machine without Docker. Treat it as
+# a starting point and expect to adjust image tags and Nakama flags.
+#
+#   docker compose -f deploy/docker-compose.yml up -d postgres nakama
+#   go run ./cmd/platform          # the backend runs on the host for fast reload
+#
+# The backend is intentionally NOT in this stack by default: during early
+# development you want `go run` + hot restarts, not an image build per change.
+
+name: gamebackend
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: nakama
+      POSTGRES_USER: nakama
+      POSTGRES_PASSWORD: localdev
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nakama -d nakama"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  nakama:
+    image: heroiclabs/nakama:${NAKAMA_VERSION:-3.22.0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint:
+      - "/bin/sh"
+      - "-ecx"
+      - >
+        /nakama/nakama migrate up --database.address nakama:localdev@postgres:5432/nakama &&
+        exec /nakama/nakama --name nakama1
+        --database.address nakama:localdev@postgres:5432/nakama
+        --logger.level DEBUG
+        --session.token_expiry_sec 7200
+        --runtime.path /nakama/data/modules
+    environment:
+      # The plugin reads these to reach the Go backend.
+      BACKEND_BASE_URL: http://host.docker.internal:8080
+      BACKEND_SERVICE_TOKEN: dev-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:7350:7350"   # client API
+      - "127.0.0.1:7351:7351"   # console (http://127.0.0.1:7351)
+      - "127.0.0.1:7349:7349"   # grpc
+    volumes:
+      # Build the plugin first:
+      #   cd nakama/modules && go mod tidy && go build -buildmode=plugin -o ../../nakama/build/gamemodule.so .
+      - ../nakama/build:/nakama/data/modules:ro
+
+volumes:
+  pgdata:

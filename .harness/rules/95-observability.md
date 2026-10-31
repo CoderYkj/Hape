@@ -1,0 +1,51 @@
+# 95 - 可观测性
+
+## 日志
+
+- 全量 JSON 到 stdout（`logx.New`），由采集侧负责落盘。
+- 固定字段：`time`、`level`、`msg`、`service`、`env`。
+- 每请求一次访问日志：`request_id`、`op`、`method`、`path`、`status`、`duration_ms`。
+- 业务事件日志：`player_id`、`result_id`、`session_id`、`applied`。
+- 5xx 用 `Error` 级别，4xx 用 `Info`（客户端错不是服务端事故）。
+
+## request_id
+
+- 入站：读 `X-Request-Id`，没有就生成 8 字节十六进制。
+- 出站：原样回写到响应头；将来跨服务调用时作为 trace 关联键。
+- 日志与错误响应共用同一个 id，用户报障时能直接定位。
+
+## 指标
+
+`/metrics` 输出 Prometheus 文本（v0 手写，不引 OpenTelemetry）：
+
+```text
+backend_requests_total{service,op,status}    counter
+backend_start_time_seconds{service}          gauge
+```
+
+新增指标命名规则：`backend_<域>_<单位>`，如 `backend_matchmaking_queue_depth`。
+**基数警告**：不要把 `player_id` 放进 label。
+
+## 健康检查的语义
+
+| 端点 | 含义 | 失败时编排器该做什么 |
+|---|---|---|
+| `/healthz` | 进程活着，能处理 HTTP | 重启 |
+| `/readyz` | 依赖就绪（DB/缓存/下游） | 停止导流，不重启 |
+
+- `/healthz` 永远不查下游：数据库慢不该让健康进程被杀。
+- `/readyz` 才是查依赖的地方（v0 无依赖，直接 ready）。
+
+## 需要告警的四件事（小团队最小集）
+
+1. 5xx 比例 > 1%（5 分钟窗口）。
+2. `session` 中 `allocating` 超过 3 分钟的数量 > 0（分配卡住）。
+3. `session` 中 `ready/in_progress` 超过 30 分钟的数量 > 0（僵尸对局）。
+4. `economy` 出现 `internal` 错误（钱的操作失败一次都值得看）。
+
+## 调试顺序（线上问题）
+
+1. 拿 `request_id` → grep 日志 → 看 `op` 与 `status`。
+2. 若是结算问题，按 `result_id` grep，确认扇出三条下游都成功。
+3. 若是分配问题，看 `provider` + `allocation_id`，去厂商控制台对账。
+4. 任何"钱不对"的怀疑，先看账本 `GET /v1/economy/players/{id}/ledger`，再谈原因。

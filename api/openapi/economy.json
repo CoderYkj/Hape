@@ -1,0 +1,438 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "economy service",
+    "version": "0.1.0",
+    "description": "Generated from the Go contract declarations. Do not edit by hand."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "local dev (single-process platform)"
+    }
+  ],
+  "paths": {
+    "/v1/economy/players/{player_id}/grants": {
+      "post": {
+        "operationId": "economy.grant",
+        "summary": "Grant currency (server-to-server, idempotent)",
+        "tags": [
+          "economy"
+        ],
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "player_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-idempotent": true,
+        "x-note": "Requires an Idempotency-Key header. Every movement is written to the ledger."
+      }
+    },
+    "/v1/economy/players/{player_id}/ledger": {
+      "get": {
+        "operationId": "economy.get_ledger",
+        "summary": "Read the caller's ledger",
+        "tags": [
+          "economy"
+        ],
+        "security": [
+          {
+            "playerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "player_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/economy/players/{player_id}/purchases": {
+      "post": {
+        "operationId": "economy.purchase",
+        "summary": "Spend currency on an item",
+        "tags": [
+          "economy"
+        ],
+        "security": [
+          {
+            "playerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "player_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurchaseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-idempotent": true,
+        "x-note": "Requires an Idempotency-Key header. Returns failed_precondition when the balance is short."
+      }
+    },
+    "/v1/economy/players/{player_id}/wallet": {
+      "get": {
+        "operationId": "economy.get_wallet",
+        "summary": "Read the caller's wallet",
+        "tags": [
+          "economy"
+        ],
+        "security": [
+          {
+            "playerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "player_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetWalletResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "properties": {
+          "error": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "GetWalletResponse": {
+        "properties": {
+          "wallet": {
+            "$ref": "#/components/schemas/Wallet"
+          }
+        },
+        "required": [
+          "wallet"
+        ],
+        "type": "object"
+      },
+      "GrantRequest": {
+        "properties": {
+          "amount": {
+            "description": "Integer amount greater than zero.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "currency": {
+            "description": "gold or gems.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Audit trail, e.g. match_reward.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "currency",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "GrantResponse": {
+        "properties": {
+          "applied": {
+            "description": "false when the idempotency key was already used.",
+            "type": "boolean"
+          },
+          "wallet": {
+            "$ref": "#/components/schemas/Wallet"
+          }
+        },
+        "required": [
+          "applied",
+          "wallet"
+        ],
+        "type": "object"
+      },
+      "LedgerEntry": {
+        "properties": {
+          "amount": {
+            "description": "Signed amount; negative for spending.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "description": "RFC3339 time of the movement.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "currency": {
+            "description": "Currency code.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ledger entry id.",
+            "type": "string"
+          },
+          "player_id": {
+            "description": "Player id.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the movement happened.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "created_at",
+          "currency",
+          "id",
+          "player_id",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "LedgerResponse": {
+        "properties": {
+          "entries": {
+            "description": "Immutable movements, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/LedgerEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "type": "object"
+      },
+      "PurchaseRequest": {
+        "properties": {
+          "amount": {
+            "description": "Price in integer minor units; the server owns pricing.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "currency": {
+            "description": "Currency to spend.",
+            "type": "string"
+          },
+          "item_id": {
+            "description": "Item being bought.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "currency",
+          "item_id"
+        ],
+        "type": "object"
+      },
+      "PurchaseResponse": {
+        "properties": {
+          "applied": {
+            "description": "false when the idempotency key was already used.",
+            "type": "boolean"
+          },
+          "wallet": {
+            "$ref": "#/components/schemas/Wallet"
+          }
+        },
+        "required": [
+          "applied",
+          "wallet"
+        ],
+        "type": "object"
+      },
+      "Wallet": {
+        "properties": {
+          "balances": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Currency code to integer balance.",
+            "type": "object"
+          },
+          "player_id": {
+            "description": "Player id.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "RFC3339 time of the last change.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "balances",
+          "player_id",
+          "updated_at"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "playerToken": {
+        "description": "Player session token issued by the account service.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "serviceToken": {
+        "description": "Internal service token. Never shipped to clients.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  }
+}

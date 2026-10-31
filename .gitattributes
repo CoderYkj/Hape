@@ -1,0 +1,14 @@
+# Everything is UTF-8 with LF, regardless of the checkout OS. The shell
+# scripts and the Makefile are executed by Linux CI; a CRLF there is a
+# "bad interpreter" failure that looks like a code bug.
+* text=auto eol=lf
+
+*.go    text eol=lf
+*.sh    text eol=lf
+*.ps1   text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.json  text eol=lf
+
+*.png   binary
+*.ico   binary

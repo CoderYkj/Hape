@@ -1,0 +1,305 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "account service",
+    "version": "0.1.0",
+    "description": "Generated from the Go contract declarations. Do not edit by hand."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "local dev (single-process platform)"
+    }
+  ],
+  "paths": {
+    "/v1/account/players/{player_id}": {
+      "get": {
+        "operationId": "account.get_player",
+        "summary": "Read a player profile",
+        "tags": [
+          "account"
+        ],
+        "security": [
+          {
+            "playerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "player_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetPlayerResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "account.update_profile",
+        "summary": "Change the caller's display name",
+        "tags": [
+          "account"
+        ],
+        "security": [
+          {
+            "playerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "player_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateProfileResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-idempotent": true
+      }
+    },
+    "/v1/account/sessions": {
+      "post": {
+        "operationId": "account.login",
+        "summary": "Exchange a verified Nakama identity for an internal player session",
+        "tags": [
+          "account"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-idempotent": true,
+        "x-note": "Idempotent by external_id: the same Nakama user always maps to the same player."
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "properties": {
+          "error": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "GetPlayerResponse": {
+        "properties": {
+          "player": {
+            "$ref": "#/components/schemas/Player"
+          }
+        },
+        "required": [
+          "player"
+        ],
+        "type": "object"
+      },
+      "LoginRequest": {
+        "properties": {
+          "display_name": {
+            "description": "Optional first-time display name; ignored for existing players.",
+            "type": "string"
+          },
+          "external_id": {
+            "description": "Nakama user id proven by the Nakama session.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "external_id"
+        ],
+        "type": "object"
+      },
+      "LoginResponse": {
+        "properties": {
+          "player": {
+            "$ref": "#/components/schemas/Player"
+          },
+          "session_token": {
+            "description": "Player token for subsequent calls. Dev builds return dev-player-\u003cid\u003e; production returns a signed JWT.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "player",
+          "session_token"
+        ],
+        "type": "object"
+      },
+      "Player": {
+        "properties": {
+          "created_at": {
+            "description": "RFC3339 creation time.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "display_name": {
+            "description": "Player-visible name.",
+            "type": "string"
+          },
+          "external_id": {
+            "description": "Nakama user id that authenticated this player.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Backend player id, stable for the account lifetime.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "RFC3339 time of the last profile change.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created_at",
+          "display_name",
+          "external_id",
+          "id",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "UpdateProfileRequest": {
+        "properties": {
+          "display_name": {
+            "description": "New display name, 1-24 characters after trimming.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "display_name"
+        ],
+        "type": "object"
+      },
+      "UpdateProfileResponse": {
+        "properties": {
+          "player": {
+            "$ref": "#/components/schemas/Player"
+          }
+        },
+        "required": [
+          "player"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "playerToken": {
+        "description": "Player session token issued by the account service.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "serviceToken": {
+        "description": "Internal service token. Never shipped to clients.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  }
+}

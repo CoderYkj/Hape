@@ -1,0 +1,532 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "session service",
+    "version": "0.1.0",
+    "description": "Generated from the Go contract declarations. Do not edit by hand."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "local dev (single-process platform)"
+    }
+  ],
+  "paths": {
+    "/v1/session/sessions": {
+      "post": {
+        "operationId": "session.create",
+        "summary": "Allocate a dedicated server for a match",
+        "tags": [
+          "session"
+        ],
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateSessionResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-note": "Not idempotent: each call allocates a dedicated server. Call it once per match_id; after a timeout, read the session back instead of creating a second one."
+      }
+    },
+    "/v1/session/sessions/{session_id}": {
+      "get": {
+        "operationId": "session.get",
+        "summary": "Poll a session for its state and server address",
+        "tags": [
+          "session"
+        ],
+        "security": [
+          {
+            "playerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSessionResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/session/sessions/{session_id}/ready": {
+      "post": {
+        "operationId": "session.mark_ready",
+        "summary": "Dedicated server reports it is listening",
+        "tags": [
+          "session"
+        ],
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkReadyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkReadyResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-idempotent": true
+      }
+    },
+    "/v1/session/sessions/{session_id}/results": {
+      "post": {
+        "operationId": "session.submit_result",
+        "summary": "Accept the authoritative battle report",
+        "tags": [
+          "session"
+        ],
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitResultRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitResultResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-idempotent": true,
+        "x-note": "Idempotent by result_id. Downstream fan-out runs before the session is marked finished, so a retry re-runs idempotent sinks."
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreateSessionRequest": {
+        "properties": {
+          "map": {
+            "description": "Map identifier handed to the dedicated server.",
+            "type": "string"
+          },
+          "match_id": {
+            "description": "Match id from matchmaking.pop.",
+            "type": "string"
+          },
+          "players": {
+            "description": "Player ids in the match, 2 to 10 unique ids.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "queue": {
+            "description": "Queue the match came from, copied onto the session.",
+            "type": "string"
+          },
+          "region": {
+            "description": "Preferred region; the allocator may override it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "match_id",
+          "players",
+          "queue"
+        ],
+        "type": "object"
+      },
+      "CreateSessionResponse": {
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/Session"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "type": "object"
+      },
+      "Error": {
+        "properties": {
+          "error": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "GetSessionResponse": {
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/Session"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "type": "object"
+      },
+      "MarkReadyRequest": {
+        "properties": {
+          "address": {
+            "description": "Address the dedicated server is listening on.",
+            "type": "string"
+          },
+          "port": {
+            "description": "Port the dedicated server is listening on.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "MarkReadyResponse": {
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/Session"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "type": "object"
+      },
+      "PlayerResult": {
+        "properties": {
+          "damage": {
+            "description": "Damage dealt, 0 or more.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "deaths": {
+            "description": "Deaths, 0 or more.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "kills": {
+            "description": "Kills, 0 or more.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "player_id": {
+            "description": "Player id.",
+            "type": "string"
+          },
+          "score": {
+            "description": "Game-specific score, 0 or more.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "won": {
+            "description": "True when the player was on the winning side.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "damage",
+          "deaths",
+          "kills",
+          "player_id",
+          "score",
+          "won"
+        ],
+        "type": "object"
+      },
+      "Session": {
+        "properties": {
+          "address": {
+            "description": "Dedicated server address reported by the provider.",
+            "type": "string"
+          },
+          "allocation_id": {
+            "description": "Provider allocation id, used to release the server.",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "RFC3339 creation time.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the accepted battle report landed."
+          },
+          "id": {
+            "description": "Session id.",
+            "type": "string"
+          },
+          "map": {
+            "description": "Map identifier passed to the dedicated server.",
+            "type": "string"
+          },
+          "match_id": {
+            "description": "Match id produced by matchmaking.",
+            "type": "string"
+          },
+          "players": {
+            "description": "Player ids expected in this match.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "port": {
+            "description": "Dedicated server port.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "provider": {
+            "description": "local, gamelift, edgegap or agones.",
+            "type": "string"
+          },
+          "queue": {
+            "description": "Queue the match came from.",
+            "type": "string"
+          },
+          "ready_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the dedicated server reported ready."
+          },
+          "region": {
+            "description": "Requested region.",
+            "type": "string"
+          },
+          "result_id": {
+            "description": "Idempotency id of the accepted battle report.",
+            "type": "string"
+          },
+          "state": {
+            "description": "allocating, ready, in_progress, finished or failed.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "allocation_id",
+          "created_at",
+          "id",
+          "map",
+          "match_id",
+          "players",
+          "port",
+          "provider",
+          "queue",
+          "region",
+          "state"
+        ],
+        "type": "object"
+      },
+      "SubmitResultRequest": {
+        "properties": {
+          "duration_seconds": {
+            "description": "Match duration in seconds.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "players": {
+            "description": "One entry per player in the session, no duplicates.",
+            "items": {
+              "$ref": "#/components/schemas/PlayerResult"
+            },
+            "type": "array"
+          },
+          "result_id": {
+            "description": "Idempotency id chosen by the dedicated server, e.g. a UUID.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "duration_seconds",
+          "players",
+          "result_id"
+        ],
+        "type": "object"
+      },
+      "SubmitResultResponse": {
+        "properties": {
+          "applied": {
+            "description": "false when the same result_id was already accepted.",
+            "type": "boolean"
+          },
+          "session": {
+            "$ref": "#/components/schemas/Session"
+          }
+        },
+        "required": [
+          "applied",
+          "session"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "playerToken": {
+        "description": "Player session token issued by the account service.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "serviceToken": {
+        "description": "Internal service token. Never shipped to clients.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  }
+}

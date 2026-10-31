@@ -1,0 +1,346 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "matchmaking service",
+    "version": "0.1.0",
+    "description": "Generated from the Go contract declarations. Do not edit by hand."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "local dev (single-process platform)"
+    }
+  ],
+  "paths": {
+    "/v1/matchmaking/queues/{queue}/pop": {
+      "post": {
+        "operationId": "matchmaking.pop",
+        "summary": "Server-side dequeue: form one match from the queue",
+        "tags": [
+          "matchmaking"
+        ],
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "queue",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PopRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PopResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-note": "Not idempotent: each call removes tickets from the queue. Exactly one matchmaker loop may pop a given queue at a time; running two of them silently splits matches."
+      }
+    },
+    "/v1/matchmaking/tickets": {
+      "post": {
+        "operationId": "matchmaking.create_ticket",
+        "summary": "Enqueue the caller (and party) for a match",
+        "tags": [
+          "matchmaking"
+        ],
+        "security": [
+          {
+            "playerToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTicketRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateTicketResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-idempotent": true,
+        "x-note": "Idempotent by (queue, player): a second enqueue returns the existing waiting ticket."
+      }
+    },
+    "/v1/matchmaking/tickets/{ticket_id}": {
+      "get": {
+        "operationId": "matchmaking.get_ticket",
+        "summary": "Poll one ticket for its match assignment",
+        "tags": [
+          "matchmaking"
+        ],
+        "security": [
+          {
+            "playerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTicketResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreateTicketRequest": {
+        "properties": {
+          "party": {
+            "description": "Additional player ids queued with the caller (team members).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "queue": {
+            "description": "Queue name, e.g. ranked_1v1 or ranked_squad.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "queue"
+        ],
+        "type": "object"
+      },
+      "CreateTicketResponse": {
+        "properties": {
+          "ticket": {
+            "$ref": "#/components/schemas/Ticket"
+          }
+        },
+        "required": [
+          "ticket"
+        ],
+        "type": "object"
+      },
+      "Error": {
+        "properties": {
+          "error": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "GetTicketResponse": {
+        "properties": {
+          "ticket": {
+            "$ref": "#/components/schemas/Ticket"
+          }
+        },
+        "required": [
+          "ticket"
+        ],
+        "type": "object"
+      },
+      "PopRequest": {
+        "properties": {
+          "count": {
+            "description": "How many players the match needs, at most 10.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "type": "object"
+      },
+      "PopResponse": {
+        "properties": {
+          "match_id": {
+            "description": "Match id shared by every returned ticket.",
+            "type": "string"
+          },
+          "matched": {
+            "description": "false when the queue could not produce a full match.",
+            "type": "boolean"
+          },
+          "tickets": {
+            "description": "Tickets that were matched.",
+            "items": {
+              "$ref": "#/components/schemas/Ticket"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "matched"
+        ],
+        "type": "object"
+      },
+      "Ticket": {
+        "properties": {
+          "created_at": {
+            "description": "RFC3339 enqueue time.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Ticket id.",
+            "type": "string"
+          },
+          "match_id": {
+            "description": "Match id once the ticket has been popped.",
+            "type": "string"
+          },
+          "mmr": {
+            "description": "Rating snapshot taken at enqueue time; never client-supplied.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "party": {
+            "description": "Additional player ids queued together.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "player_id": {
+            "description": "Player that owns the ticket.",
+            "type": "string"
+          },
+          "queue": {
+            "description": "Queue name, e.g. ranked_1v1.",
+            "type": "string"
+          },
+          "status": {
+            "description": "waiting or matched.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "RFC3339 time of the last state change.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created_at",
+          "id",
+          "mmr",
+          "party",
+          "player_id",
+          "queue",
+          "status",
+          "updated_at"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "playerToken": {
+        "description": "Player session token issued by the account service.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "serviceToken": {
+        "description": "Internal service token. Never shipped to clients.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  }
+}

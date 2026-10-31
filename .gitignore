@@ -1,0 +1,23 @@
+# build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# go caches, if someone runs go with the default settings inside the repo
+/.tools/
+/vendor/
+
+# local configuration and secrets — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# editor / OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

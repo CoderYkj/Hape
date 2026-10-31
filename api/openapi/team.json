@@ -1,0 +1,316 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "team service",
+    "version": "0.1.0",
+    "description": "Generated from the Go contract declarations. Do not edit by hand."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "local dev (single-process platform)"
+    }
+  ],
+  "paths": {
+    "/v1/team/teams": {
+      "post": {
+        "operationId": "team.create",
+        "summary": "Create a team owned by the caller",
+        "tags": [
+          "team"
+        ],
+        "security": [
+          {
+            "playerToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTeamRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateTeamResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-note": "Not idempotent: every call creates a new team. A client that retries after a timeout can create a duplicate, so it must read back team membership before retrying."
+      }
+    },
+    "/v1/team/teams/{team_id}": {
+      "get": {
+        "operationId": "team.get",
+        "summary": "Read a team and its members",
+        "tags": [
+          "team"
+        ],
+        "security": [
+          {
+            "playerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTeamResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/team/teams/{team_id}/members": {
+      "post": {
+        "operationId": "team.join",
+        "summary": "Join a team as the caller (idempotent)",
+        "tags": [
+          "team"
+        ],
+        "security": [
+          {
+            "playerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JoinTeamResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-idempotent": true
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreateTeamRequest": {
+        "properties": {
+          "name": {
+            "description": "Team name, 1-32 characters.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "CreateTeamResponse": {
+        "properties": {
+          "team": {
+            "$ref": "#/components/schemas/Team"
+          }
+        },
+        "required": [
+          "team"
+        ],
+        "type": "object"
+      },
+      "Error": {
+        "properties": {
+          "error": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "GetTeamResponse": {
+        "properties": {
+          "team": {
+            "$ref": "#/components/schemas/Team"
+          }
+        },
+        "required": [
+          "team"
+        ],
+        "type": "object"
+      },
+      "JoinTeamResponse": {
+        "properties": {
+          "applied": {
+            "description": "false when the caller was already a member; the call is idempotent.",
+            "type": "boolean"
+          },
+          "team": {
+            "$ref": "#/components/schemas/Team"
+          }
+        },
+        "required": [
+          "applied",
+          "team"
+        ],
+        "type": "object"
+      },
+      "Member": {
+        "properties": {
+          "joined_at": {
+            "description": "RFC3339 join time.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "player_id": {
+            "description": "Backend player id.",
+            "type": "string"
+          },
+          "role": {
+            "description": "owner or member.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "joined_at",
+          "player_id",
+          "role"
+        ],
+        "type": "object"
+      },
+      "Team": {
+        "properties": {
+          "created_at": {
+            "description": "RFC3339 creation time.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Team id.",
+            "type": "string"
+          },
+          "members": {
+            "description": "Team members, owner first.",
+            "items": {
+              "$ref": "#/components/schemas/Member"
+            },
+            "type": "array"
+          },
+          "name": {
+            "description": "Human-readable team name.",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Player id that created the team.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "RFC3339 time of the last membership change.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created_at",
+          "id",
+          "members",
+          "name",
+          "owner_id",
+          "updated_at"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "playerToken": {
+        "description": "Player session token issued by the account service.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "serviceToken": {
+        "description": "Internal service token. Never shipped to clients.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  }
+}

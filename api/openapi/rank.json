@@ -1,0 +1,323 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "rank service",
+    "version": "0.1.0",
+    "description": "Generated from the Go contract declarations. Do not edit by hand."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "local dev (single-process platform)"
+    }
+  ],
+  "paths": {
+    "/v1/rank/leaderboards/{board}": {
+      "get": {
+        "operationId": "rank.get_leaderboard",
+        "summary": "Read a leaderboard",
+        "tags": [
+          "rank"
+        ],
+        "security": [
+          {
+            "playerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "board",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetLeaderboardResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/rank/leaderboards/{board}/scores": {
+      "post": {
+        "operationId": "rank.submit_result",
+        "summary": "Apply an authoritative match outcome to a player's rating",
+        "tags": [
+          "rank"
+        ],
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "board",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitResultRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitResultResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-idempotent": true,
+        "x-note": "Requires an Idempotency-Key header; replay returns delta=0 and applied=false."
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Entry": {
+        "properties": {
+          "losses": {
+            "description": "Matches lost.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "player_id": {
+            "description": "Player id.",
+            "type": "string"
+          },
+          "rank": {
+            "description": "1-based position on this board.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "rating": {
+            "description": "Current MMR.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "wins": {
+            "description": "Matches won.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "losses",
+          "player_id",
+          "rank",
+          "rating",
+          "wins"
+        ],
+        "type": "object"
+      },
+      "Error": {
+        "properties": {
+          "error": {
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "GetLeaderboardResponse": {
+        "properties": {
+          "leaderboard": {
+            "$ref": "#/components/schemas/Leaderboard"
+          }
+        },
+        "required": [
+          "leaderboard"
+        ],
+        "type": "object"
+      },
+      "Leaderboard": {
+        "properties": {
+          "board": {
+            "description": "Board name.",
+            "type": "string"
+          },
+          "entries": {
+            "description": "Top entries, best first.",
+            "items": {
+              "$ref": "#/components/schemas/Entry"
+            },
+            "type": "array"
+          },
+          "season": {
+            "description": "Season identifier; ratings reset between seasons.",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "RFC3339 snapshot time.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "board",
+          "entries",
+          "season",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "Rating": {
+        "properties": {
+          "board": {
+            "description": "Board name, e.g. ranked_1v1.",
+            "type": "string"
+          },
+          "losses": {
+            "description": "Matches lost.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "player_id": {
+            "description": "Player id.",
+            "type": "string"
+          },
+          "rating": {
+            "description": "Current MMR.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "updated_at": {
+            "description": "RFC3339 time of the last change.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "wins": {
+            "description": "Matches won.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "board",
+          "losses",
+          "player_id",
+          "rating",
+          "updated_at",
+          "wins"
+        ],
+        "type": "object"
+      },
+      "SubmitResultRequest": {
+        "properties": {
+          "player_id": {
+            "description": "Player whose rating changes.",
+            "type": "string"
+          },
+          "won": {
+            "description": "Outcome of the match for this player.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "player_id",
+          "won"
+        ],
+        "type": "object"
+      },
+      "SubmitResultResponse": {
+        "properties": {
+          "applied": {
+            "description": "false when the idempotency key was already used.",
+            "type": "boolean"
+          },
+          "delta": {
+            "description": "Rating change applied; 0 on an idempotent replay.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/Rating"
+          }
+        },
+        "required": [
+          "applied",
+          "delta",
+          "rating"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "playerToken": {
+        "description": "Player session token issued by the account service.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "serviceToken": {
+        "description": "Internal service token. Never shipped to clients.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  }
+}

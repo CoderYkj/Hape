@@ -1,0 +1,54 @@
+# CI for the backend. This file assumes the repository root IS the backend
+# directory (the layout of this repo). If the backend is ever nested inside a
+# larger repo, move this file to that repo's .github/workflows and add
+# `defaults: run: working-directory: <backend-dir>`.
+#
+# Mirrors `scripts/verify.sh` step by step; keep them in sync.
+
+name: backend
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          # The module graph is the standard library only, so there is nothing
+          # for setup-go to cache.
+          cache: false
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "Files that need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test (race)
+        run: go test -race ./...
+
+      - name: contract drift
+        run: |
+          go run ./tools/apigen -check || {
+            echo "OpenAPI is stale. Run: go run ./tools/apigen"
+            exit 1
+          }
