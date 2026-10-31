@@ -1,18 +1,21 @@
-# Local development stack: Postgres + Nakama + (optionally) the Go backend.
-#
-# NOT VERIFIED: written on a machine with no Docker, so no version of this file
-# has ever been brought up. Expect to adjust image tags and Nakama flags.
+# Local development stack: Postgres + (optionally) the Go backend + Nakama.
 #
 # Two ways to run the backend:
 #
 #   host       go run ./cmd/platform          # fast reload, no image build
 #   container  docker compose -f deploy/docker-compose.yml up -d --build backend
 #
-# Nakama reaches the backend through BACKEND_BASE_URL. The default below assumes
-# the backend runs on the host; when it runs in this stack, export
+# The image and this file are exercised in CI (.github/workflows/ci.yml, jobs
+# `image` and `compose`), which is where the Docker daemon lives for this project.
+# `docker compose up` on a machine with Docker is the same thing locally.
+#
+# Nakama reaches the backend through BACKEND_BASE_URL. The default assumes the
+# backend runs on the host; when it runs in this stack, export
 # BACKEND_BASE_URL=http://backend:8080 before `up`.
 #
-#   docker compose -f deploy/docker-compose.yml up -d postgres nakama
+# First boot creates the backend's database from deploy/postgres-init/. On an
+# existing pgdata volume that script does not run again - `docker compose down -v`
+# to start over.
 
 name: gamebackend
 
@@ -27,26 +30,38 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Runs once, on first boot: creates the `gamebackend` database and role.
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U nakama -d nakama"]
       interval: 3s
       timeout: 3s
       retries: 20
 
-  # The backend keeps its data in memory in v0, so it deliberately does NOT
-  # depend on postgres yet. M1 adds the SQL stores and turns this into
-  # depends_on: postgres (condition: service_healthy) plus BACKEND_DATABASE_URL.
   backend:
     build:
       context: ..
       dockerfile: Dockerfile
     image: gamebackend:local
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       BACKEND_ENV: dev
       BACKEND_ADDR: 0.0.0.0:8080
       BACKEND_DEV_AUTH: "true"
       BACKEND_SERVICE_TOKEN: dev-service
       BACKEND_ALLOCATOR: local
+      # All seven domains use PostgreSQL when this is set (ADR 0006). The schema is
+      # NOT applied by the container: run db/migrations/*.sql before using it, e.g.
+      #   for f in db/migrations/*.sql; do
+      #     docker compose -f deploy/docker-compose.yml exec -T postgres \
+      #       psql -U gamebackend -d gamebackend -v ON_ERROR_STOP=1 < "$f"
+      #   done
+      # Starting before the migration is harmless (no query at boot) but /healthz
+      # proves nothing until the schema exists - the CI compose job asserts a row
+      # actually lands in the database.
+      BACKEND_DATABASE_URL: postgres://gamebackend:gamebackend@postgres:5432/gamebackend?sslmode=disable
       LOG_LEVEL: info
     ports:
       - "127.0.0.1:8080:8080"

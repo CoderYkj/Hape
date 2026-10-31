@@ -19,7 +19,7 @@ WORKDIR /src
 # go.mod first: it is the only input to `go mod download`, so the module cache
 # layer survives every source edit. Today there are zero dependencies; the layer
 # is here so adding one does not invalidate the whole build.
-COPY go.mod ./
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .

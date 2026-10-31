@@ -101,3 +101,90 @@ jobs:
             echo "OpenAPI is stale. Run: go run ./tools/apigen"
             exit 1
           }
+
+  # The Dockerfile and the compose stack are not runnable on a developer machine
+  # without Docker, so they are exercised here instead: build the image, run it,
+  # probe it; then bring up compose with a real database, apply the migrations and
+  # prove a request actually lands a row in PostgreSQL.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build image
+        run: docker build -t hape:ci .
+
+      - name: run and probe
+        run: |
+          docker run -d --rm --name hape-ci -p 8080:8080 hape:ci
+          ok=no
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8080/healthz; then ok=yes; break; fi
+            sleep 1
+          done
+          if [ "$ok" != yes ]; then
+            echo "backend never became healthy"
+            docker logs hape-ci
+            exit 1
+          fi
+          curl -fsS http://127.0.0.1:8080/readyz
+          curl -fsS http://127.0.0.1:8080/metrics | head -5
+          # The image must run as a non-root user (Dockerfile claim, checked here).
+          test "$(docker exec hape-ci id -u)" = "10001"
+          docker stop hape-ci
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: validate compose file
+        run: docker compose -f deploy/docker-compose.yml config -q
+
+      - name: up postgres + backend
+        run: docker compose -f deploy/docker-compose.yml up -d --build postgres backend
+
+      - name: wait for the backend
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/healthz; then exit 0; fi
+            sleep 2
+          done
+          echo "backend never became healthy"
+          docker compose -f deploy/docker-compose.yml logs backend
+          exit 1
+
+      - name: apply migrations
+        run: |
+          for f in db/migrations/*.sql; do
+            echo "applying $f"
+            docker compose -f deploy/docker-compose.yml exec -T postgres \
+              psql -U gamebackend -d gamebackend -v ON_ERROR_STOP=1 < "$f"
+          done
+
+      - name: schema probes
+        run: |
+          for f in db/probes/*.probe.sql; do
+            echo "probing $f"
+            docker compose -f deploy/docker-compose.yml exec -T postgres \
+              psql -U gamebackend -d gamebackend -t -q -v ON_ERROR_STOP=1 < "$f"
+          done
+
+      - name: a request must land in the database
+        run: |
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            -d '{"external_id":"ci-smoke"}' \
+            http://127.0.0.1:8080/v1/account/sessions
+          count="$(docker compose -f deploy/docker-compose.yml exec -T postgres \
+            psql -U gamebackend -d gamebackend -tAc \
+            "select count(*) from players where external_id = 'ci-smoke'")"
+          echo "players with external_id=ci-smoke: $count"
+          test "$count" = "1"
+
+      - name: logs on failure
+        if: failure()
+        run: docker compose -f deploy/docker-compose.yml logs --no-color
+
+      - name: tear down
+        if: always()
+        run: docker compose -f deploy/docker-compose.yml down -v
