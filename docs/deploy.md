@@ -97,6 +97,8 @@ BACKEND_BASE_URL=http://backend:8080 \
 | `BACKEND_ALLOCATOR` | `local` | `local` / `gamelift` / `edgegap` / `agones`；后三者是返回 `ErrNotConfigured` 的桩 |
 | `BACKEND_DATABASE_URL` | 空 | v0 不读（内存存储）；M1 开始生效 |
 | `BACKEND_REGIONS` | `local` | 逗号分隔的区域列表 |
+| `BACKEND_RECONCILE_INTERVAL` | `0`（关闭） | 超时会话清理的周期，如 `30s`；格式错误启动即失败 |
+| `BACKEND_SESSION_STALE_AFTER` | `5m` | 会话在 `allocating`/`ready` 停留多久算死；必须为正 |
 
 两条硬规则（`Config.Validate` 与 `platform.New` 各拦一条）：
 

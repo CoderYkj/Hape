@@ -40,7 +40,8 @@ UE5 的 Dedicated Server 是唯一能跑同一套战斗代码、且不把战斗�
 负面：
 
 - **网络多一跳**：DS 必须能访问后端（内网或公网 + token）。托管环境下要配 egress。
-- **DS 崩溃 = 战报丢失**：需要"僵尸 session 对账"（未实现，见 90 文档待定项）。
+- **DS 崩溃 = 战报丢失**：需要"僵尸 session 对账"（已接单机版：`platform.RunReconciler`
+  定时 `ExpireStale`，默认关；多实例选主见 90 文档待定项）。
 - **没有 relay**：客户端直连 DS，NAT/防火墙问题在一部分玩家身上会变成"连不上"，需要后续 TURN/relay 方案。
 - 当前 DS 认证是共享 service token，泄露面大（有 per-allocation token 的计划）。
 

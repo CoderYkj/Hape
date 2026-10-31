@@ -131,7 +131,7 @@ type Allocator interface {
 
 1. `Allocate` 带超时（建议 10s）与可重试的错误分类（可重试：限流/5xx；不可重试：配置错误）。
 2. 拿不到机器时返回错误，不要返回零值 `Allocation`。
-3. `Release` 在会话结束/失败时调用（v0 未接，接的时候在 `session` 里补调用点）。
+3. `Release` 在"对局结束"与"清理超时会话"两条路径都要调到（v0 已接：`session.submitResult` 成功结算后、`session.ExpireStale` 里各一次，都是 best-effort）。
 4. 不把厂商 SDK 类型泄漏到 `services/*`；适配器内部爱怎么用怎么用。
 
 各厂商落点（供实现时参考，均未接入）：
@@ -145,7 +145,10 @@ type Allocator interface {
 - **早期不要自建 fleet**：用托管，把 `Allocator` 当成唯一接触面。
 - **不要假设秒级分配**：托管常在 20–90s 量级。`allocating` 状态可以持续很久，客户端需要"准备中"UI。
 - **分配会失败**：区域容量不足、配额、镜像拉取都会失败。失败必须落到 `failed`，并允许 matchmaker 重试新 session。
-- **DS 会挂**：挂了就没有战报。需要一个对账任务把超过 N 分钟仍 `ready/in_progress` 的 session 标记 `failed`（v0 未实现，标记为 TODO，别写成已完成）。
+- **DS 会挂**：挂了就没有战报。需要一个对账任务把超时仍停在 `allocating`/`ready` 的 session 标记 `failed`。
+  v0 已实现单机版：`platform.RunReconciler` 定时调 `session.ExpireStale`，
+  由 `BACKEND_RECONCILE_INTERVAL` 开启（默认关），`BACKEND_SESSION_STALE_AFTER` 定阈值（默认 5m）。
+  `in_progress` 刻意不扫——没有单局时长上限时，杀一个正在打的对局比漏一个更糟。
 - **回收**：托管厂商按秒计费，空转的 DS 就是纯亏损。`Release` 必须在"对局结束 + TTL 到期"两条路径都调到。
 
 ## 6. 反作弊（v0 做到哪一步）
@@ -182,8 +185,8 @@ BACKEND_ALLOCATOR=gamelift go run ./cmd/platform
 | 项 | 现状 | 需要做什么 |
 |---|---|---|
 | DS ↔ 后端认证 | 共享 `dev-service` token | per-allocation 短期 token 或 mTLS |
-| 会话回收 | 不自动 Release | 结束/超时两条路径调 `Release` |
-| 僵尸会话对账 | 无 | 定时任务扫超时 session |
+| 会话回收 | 已接：结束 + 超时两条路径（best-effort） | 厂商侧确认回收成功（现在只记日志） |
+| 僵尸会话对账 | 已接：平台内定时器，opt-in | 多实例部署时的单活选主；`in_progress` 的时长上限 |
 | 玩家进入事件 | ready 直接可结算 | DS 上报 `in_progress` |
 | 掉线重连 | 未设计 | 需要 session 保存玩家连接状态 |
 | 战报 schema 版本 | 无版本号 | 加 `schema_version` 字段 |

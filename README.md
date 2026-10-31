@@ -97,7 +97,9 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
   拆出去只需一个 main。
 - 认证是开发态（`Bearer dev-player-<id>` / `Bearer dev-service`），
   `prod` 环境启动即拒绝。
-- 没有会话回收器（僵尸 `allocating` 会话需要后续补 reconcile）。
+- 会话回收与超时对账已接：结算后 `Release` 一次、`ExpireStale` 清理停在
+  `allocating`/`ready` 的会话并 `Release`。定时器默认**关**，用
+  `BACKEND_RECONCILE_INTERVAL` 打开（多实例还没有单活选主）。
 - 战斗服鉴权用共享 service token，没有 per-allocation token（见 ADR-0003）。
 
 ## 路线图
@@ -106,7 +108,7 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 |---|---|
 | M0 ✅ | 垂直切片：单机跑通完整对局闭环（当前状态） |
 | M1 | 接 Postgres：把 `Memory` 换成 SQL 实现，跑本仓库的 migration |
-| M2 | 接真实托管分配器：填 `pkg/battlealloc` 的厂商实现 + 会话回收 |
+| M2 | 接真实托管分配器：填 `pkg/battlealloc` 的厂商实现（回收与超时对账的骨架已在 M0 里） |
 | M3 | Nakama 落地：账号/RPC 桥接跑通，客户端登录链路打通 |
 | M4 | 服务拆分：rank / matchmaking 独立进程，加 gRPC 或消息队列 |
 | M5 | 可观测性与容量：指标落地、压测、SLO |

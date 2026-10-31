@@ -100,7 +100,9 @@ SQL schema 见 `db/migrations/0001_init.sql`（M2 目标，v0 未启用）。
 | 单元 | `pkg/api`：形状反射、路径参数、重复路由校验 |
 | 契约 | `platform`：op 合法、7 个服务都有 op、写操作声明重试语义、session 写操作必须 service auth |
 | e2e | 完整闭环；匿名读、越权读、客户端伪造战报、重复上报、冲突上报、余额不足、未知字段 |
-| 失败模式 | `services/session`：分配失败→503+会话 failed、扇出失败→503+会话保持 ready 且可重试、战报玩家集合必须与名单一致、非参战者读会话→403、名单校验（<2 / 重复 / 空） |
+| 失败模式 | `services/session`：分配失败→503+会话 failed、扇出失败→503+会话保持 ready 且可重试、战报玩家集合必须与名单一致、非参战者读会话→403、名单校验（<2 / 重复 / 空）、结算后 `Release` 恰好一次且重放不重复释放、超时会话被扫成 failed 并 `Release` |
+| 装配 | `platform`：dev auth 关闭且未注入认证器→拒绝启动、注入后可启动、reconciler 关闭时立即返回、开启时把超时会话扫成 failed |
+| 配置 | `pkg/config`：默认值、duration 解析、格式错误即报错、prod+dev auth 拒绝、开启清理但阈值为 0 拒绝 |
 
 ## 9. 回滚方案
 
@@ -109,5 +111,6 @@ v0 无持久化，回滚 = 回退镜像。无数据迁移。
 ## 10. 未决问题
 
 - [ ] DS 与后端的 per-allocation token 何时落地（见 ADR 0003）
-- [ ] 僵尸会话对账任务由谁调度（v0 无调度器）
+- [x] 僵尸会话对账由谁调度 → 已定：`platform.RunReconciler` 用进程内 ticker，
+      `BACKEND_RECONCILE_INTERVAL` 开启（默认关）。多实例时的单活选主仍未定。
 - [ ] 战报 `schema_version` 字段是否需要（UE5 版本升级时）

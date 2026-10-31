@@ -133,7 +133,7 @@ sequenceDiagram
 | M1 | Nakama 联调：真实登录 → `account.login` | Nakama 本地起得来 |
 | M2 | Postgres + 迁移（`db/migrations`） | 确认 schema |
 | M3 | 真实托管服适配器（一家）+ `Release` 接线 | 厂商账号与配额 |
-| M4 | 对账任务（僵尸会话）、per-allocation token | M3 |
+| M4 | per-allocation token、对账任务的单活选主与告警 | M3 |
 | M5 | 按热点拆服务（`cmd/<域>` 已有样例） | 单机压力见顶 |
 
 ## 7. 目录与依赖方向

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -58,6 +59,16 @@ type Store interface {
 	Update(id string, mutate func(*Session) error) (Session, error)
 }
 
+// Expirer is the optional capability the reconciler needs: find sessions that
+// have been sitting in a pre-match state for too long and mark them failed.
+//
+// It is deliberately not part of Store. A store that cannot scan (sharded, or a
+// remote index behind its own API) simply does not implement it, and the caller
+// can report "this deployment cannot sweep" instead of pretending it ran.
+type Expirer interface {
+	ExpireStale(before time.Time) []Session
+}
+
 // Memory is the in-memory Store.
 type Memory struct {
 	mu   sync.Mutex
@@ -99,6 +110,35 @@ func (m *Memory) Update(id string, mutate func(*Session) error) (Session, error)
 	}
 	m.byID[id] = session
 	return session, nil
+}
+
+// ExpireStale fails every session still allocating or ready since before
+// `before`, and returns them. in_progress is excluded on purpose: a legitimate
+// long match and an abandoned one are indistinguishable without a per-game
+// timeout, and killing a live match is worse than paying for a leaked one.
+func (m *Memory) ExpireStale(before time.Time) []Session {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var expired []Session
+	for id, session := range m.byID {
+		if session.State != StateAllocating && session.State != StateReady {
+			continue
+		}
+		if !session.CreatedAt.Before(before) {
+			continue
+		}
+		if !CanTransition(session.State, StateFailed) {
+			continue
+		}
+		session.State = StateFailed
+		m.byID[id] = session
+		expired = append(expired, session)
+	}
+	// Deterministic order: map iteration is random, and a reconciler log that
+	// reorders itself on every tick is useless for diffing.
+	sort.Slice(expired, func(i, j int) bool { return expired[i].ID < expired[j].ID })
+	return expired
 }
 
 // CanTransition reports whether from -> to is allowed.

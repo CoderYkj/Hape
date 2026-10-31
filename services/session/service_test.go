@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"gamebackend/pkg/battlealloc"
 	"gamebackend/pkg/httpx"
@@ -24,7 +25,8 @@ const serviceToken = "dev-service"
 // fakeAllocator fails on demand, so "the provider is out of capacity" is a
 // one-line switch instead of a vendor account.
 type fakeAllocator struct {
-	fail bool
+	fail     bool
+	released []string
 }
 
 func (f *fakeAllocator) Provider() string { return "fake" }
@@ -36,7 +38,13 @@ func (f *fakeAllocator) Allocate(context.Context, battlealloc.Request) (battleal
 	return battlealloc.Allocation{ID: "alloc-1", Provider: "fake", Address: "10.0.0.9", Port: 7777}, nil
 }
 
-func (f *fakeAllocator) Release(context.Context, string) error { return nil }
+func (f *fakeAllocator) Release(_ context.Context, allocationID string) error {
+	if allocationID == "" {
+		return errors.New("release called without an allocation id")
+	}
+	f.released = append(f.released, allocationID)
+	return nil
+}
 
 // fakeSink is the fan-out boundary: it can be broken and then repaired, which
 // is exactly the retry story the contract promises.
@@ -311,5 +319,106 @@ func TestCreateValidatesTheRoster(t *testing.T) {
 		if code, _ := nested(t, body, "error", "code").(string); code != "invalid_argument" {
 			t.Fatalf("%s: error code = %q, want invalid_argument", name, code)
 		}
+	}
+}
+
+// TestSubmitResultReleasesTheServer closes the "allocated but never released"
+// leak: a finished match hands the dedicated server back exactly once.
+func TestSubmitResultReleasesTheServer(t *testing.T) {
+	alloc := &fakeAllocator{}
+	h := newHarness(t, alloc, &fakeSink{})
+	id := h.createSession("p_1", "p_2")
+	h.ready(id)
+
+	status, _ := h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", h.report(id), h.auth)
+	h.expect(status, http.StatusOK, "battle report")
+
+	if len(alloc.released) != 1 {
+		t.Fatalf("releases = %v, want exactly one", alloc.released)
+	}
+	if alloc.released[0] != "alloc-1" {
+		t.Fatalf("released %q, want the allocation id", alloc.released[0])
+	}
+
+	// A replay must not release twice: the server is already gone.
+	status, _ = h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", h.report(id), h.auth)
+	h.expect(status, http.StatusOK, "replay")
+	if len(alloc.released) != 1 {
+		t.Fatalf("releases after replay = %v, want still one", alloc.released)
+	}
+}
+
+// TestExpireStaleKillsAbandonedSessionsAndReleasesThem is the reconciler's
+// contract: a session stuck in allocating is failed, and its server returned.
+func TestExpireStaleKillsAbandonedSessionsAndReleasesThem(t *testing.T) {
+	alloc := &fakeAllocator{}
+	h := newHarness(t, alloc, &fakeSink{})
+	id := h.createSession("p_1", "p_2")
+
+	// Fresh: nothing is stale yet.
+	expired, err := h.app.ExpireStale(context.Background(), time.Now(), 5*time.Minute)
+	if err != nil {
+		t.Fatalf("ExpireStale: %v", err)
+	}
+	if len(expired) != 0 {
+		t.Fatalf("expired = %v, want nothing for a fresh session", expired)
+	}
+
+	// Ten minutes later the same session is abandoned.
+	expired, err = h.app.ExpireStale(context.Background(), time.Now().Add(10*time.Minute), 5*time.Minute)
+	if err != nil {
+		t.Fatalf("ExpireStale: %v", err)
+	}
+	if len(expired) != 1 || expired[0].ID != id {
+		t.Fatalf("expired = %v, want the one abandoned session %s", expired, id)
+	}
+	if len(alloc.released) != 1 || alloc.released[0] != "alloc-1" {
+		t.Fatalf("released = %v, want the abandoned allocation", alloc.released)
+	}
+
+	// The state is visible to a player polling the session.
+	_, body := h.do(http.MethodGet, "/v1/session/sessions/"+id, nil, "dev-player-p_1")
+	if state, _ := nested(t, body, "session", "state").(string); state != StateFailed {
+		t.Fatalf("session state = %q, want failed", state)
+	}
+
+	// And a second sweep finds nothing: expiry is not cumulative.
+	expired, err = h.app.ExpireStale(context.Background(), time.Now().Add(20*time.Minute), 5*time.Minute)
+	if err != nil {
+		t.Fatalf("second ExpireStale: %v", err)
+	}
+	if len(expired) != 0 {
+		t.Fatalf("second sweep expired %v, want nothing", expired)
+	}
+}
+
+// TestExpireStaleLeavesFinishedSessionsAlone keeps the sweep from rewriting
+// history: a finished match is not stale, however old it is.
+func TestExpireStaleLeavesFinishedSessionsAlone(t *testing.T) {
+	alloc := &fakeAllocator{}
+	h := newHarness(t, alloc, &fakeSink{})
+	id := h.createSession("p_1", "p_2")
+	h.ready(id)
+	status, _ := h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", h.report(id), h.auth)
+	h.expect(status, http.StatusOK, "battle report")
+
+	expired, err := h.app.ExpireStale(context.Background(), time.Now().Add(24*time.Hour), time.Minute)
+	if err != nil {
+		t.Fatalf("ExpireStale: %v", err)
+	}
+	if len(expired) != 0 {
+		t.Fatalf("expired = %v, want nothing for a finished session", expired)
+	}
+	if len(alloc.released) != 1 {
+		t.Fatalf("releases = %v, want only the finish-time release", alloc.released)
+	}
+}
+
+// TestExpireStaleRefusesANonsenseWindow keeps a zero window from killing every
+// session the moment a timer fires.
+func TestExpireStaleRefusesANonsenseWindow(t *testing.T) {
+	h := newHarness(t, &fakeAllocator{}, &fakeSink{})
+	if _, err := h.app.ExpireStale(context.Background(), time.Now(), 0); err == nil {
+		t.Fatal("ExpireStale with a zero window should fail loudly")
 	}
 }

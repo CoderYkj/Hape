@@ -9,6 +9,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -332,9 +333,60 @@ func (s *Service) submitResult(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// The match is over, so the dedicated server is no longer needed. Best
+	// effort: the report is already accepted, and a leaked allocation is a bill,
+	// not a correctness bug. Never fail the request over a release.
+	if updated.AllocationID != "" {
+		if err := s.alloc.Release(r.Context(), updated.AllocationID); err != nil {
+			s.log.WarnContext(r.Context(), "release after match failed", "session_id", sessionID,
+				"allocation_id", updated.AllocationID, "err", err)
+		}
+	}
+
 	s.log.InfoContext(r.Context(), "session finished", "session_id", sessionID,
 		"result_id", req.ResultID, "applied", true)
 	return SubmitResultResponse{Session: updated, Applied: true}, nil
+}
+
+// StaleSession is one session the reconciler declared dead.
+type StaleSession struct {
+	ID           string
+	Provider     string
+	AllocationID string
+}
+
+// ErrNoExpirer is returned when the active store cannot enumerate sessions, so
+// a sweep is impossible in this deployment.
+var ErrNoExpirer = errors.New("session store cannot enumerate stale sessions")
+
+// ExpireStale fails sessions that sat in allocating or ready for longer than
+// staleAfter, and releases their dedicated servers.
+//
+// Safe to run from a timer: the state change goes through CanTransition, and the
+// release is best-effort (a provider that already dropped the instance returns
+// an error we log instead of failing the whole sweep).
+func (s *Service) ExpireStale(ctx context.Context, now time.Time, staleAfter time.Duration) ([]StaleSession, error) {
+	if staleAfter <= 0 {
+		return nil, fmt.Errorf("session: staleAfter must be positive, got %s", staleAfter)
+	}
+	expirer, ok := s.store.(Expirer)
+	if !ok {
+		return nil, ErrNoExpirer
+	}
+
+	expired := expirer.ExpireStale(now.Add(-staleAfter))
+	out := make([]StaleSession, 0, len(expired))
+	for _, stale := range expired {
+		if err := s.alloc.Release(ctx, stale.AllocationID); err != nil {
+			s.log.WarnContext(ctx, "release after expiry failed", "session_id", stale.ID,
+				"allocation_id", stale.AllocationID, "err", err)
+		}
+		s.log.WarnContext(ctx, "session expired", "session_id", stale.ID, "match_id", stale.MatchID,
+			"provider", stale.Provider, "allocation_id", stale.AllocationID, "stale_state", StateFailed)
+		out = append(out, StaleSession{ID: stale.ID, Provider: stale.Provider, AllocationID: stale.AllocationID})
+	}
+	return out, nil
 }
 
 func (s *Service) get(r *http.Request) (any, error) {

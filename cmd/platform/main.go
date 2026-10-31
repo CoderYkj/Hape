@@ -24,17 +24,22 @@ func main() {
 }
 
 func run() error {
-	cfg := config.Load("platform", ":8080")
+	cfg, err := config.Load("platform", ":8080")
+	if err != nil {
+		return err
+	}
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
 
 	app, err := platform.New(platform.Config{
-		Env:          cfg.Env,
-		LogLevel:     cfg.LogLevel,
-		DevAuth:      cfg.DevAuth,
-		ServiceToken: cfg.ServiceToken,
-		Allocator:    cfg.Allocator,
+		Env:               cfg.Env,
+		LogLevel:          cfg.LogLevel,
+		DevAuth:           cfg.DevAuth,
+		ServiceToken:      cfg.ServiceToken,
+		Allocator:         cfg.Allocator,
+		ReconcileInterval: cfg.ReconcileInterval,
+		SessionStaleAfter: cfg.SessionStaleAfter,
 	})
 	if err != nil {
 		return err
@@ -43,6 +48,10 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// The sweep is opt-in (BACKEND_RECONCILE_INTERVAL=0 by default) and returns
+	// immediately when disabled, so starting it unconditionally is safe.
+	go app.RunReconciler(ctx)
 
 	err = httpx.Run(ctx, app.Logger(), cfg.Addr, app.Handler())
 	if errors.Is(err, context.Canceled) {

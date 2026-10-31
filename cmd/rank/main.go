@@ -27,9 +27,17 @@ func main() {
 }
 
 func run() error {
-	cfg := config.Load("rank", ":8087")
+	cfg, err := config.Load("rank", ":8087")
+	if err != nil {
+		return err
+	}
 	if err := cfg.Validate(); err != nil {
 		return err
+	}
+	// Same rule as the platform: never serve dev bearer tokens when dev auth is
+	// switched off. A split service is still a service.
+	if !cfg.DevAuth {
+		return fmt.Errorf("rank: dev auth is disabled and no production Authenticator is wired (M3)")
 	}
 
 	log := logx.New("rank", cfg.Env, cfg.LogLevel)
@@ -40,7 +48,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	err := httpx.Run(ctx, log, cfg.Addr, router)
+	err = httpx.Run(ctx, log, cfg.Addr, router)
 	if errors.Is(err, context.Canceled) {
 		return nil
 	}

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"gamebackend/pkg/api"
 	"gamebackend/pkg/battlealloc"
@@ -40,13 +41,20 @@ type Config struct {
 	// string, and a server that silently falls back to it is worse than one
 	// that refuses to start.
 	Authenticator httpx.Authenticator
+	// ReconcileInterval enables the stale-session sweep. Zero disables it.
+	ReconcileInterval time.Duration
+	// SessionStaleAfter is the allocating/ready age at which a session is
+	// declared dead. Defaults to 5 minutes when unset.
+	SessionStaleAfter time.Duration
 }
 
 // Platform is the wired application.
 type Platform struct {
-	log    *slog.Logger
-	router *httpx.Router
-	alloc  battlealloc.Allocator
+	log               *slog.Logger
+	router            *httpx.Router
+	alloc             battlealloc.Allocator
+	reconcileInterval time.Duration
+	sessionStaleAfter time.Duration
 
 	Account     *account.Service
 	Team        *team.Service
@@ -81,7 +89,17 @@ func New(cfg Config) (*Platform, error) {
 	router := httpx.NewRouter("platform", log, auth)
 	alloc := battlealloc.New(cfg.Allocator)
 
-	p := &Platform{log: log, router: router, alloc: alloc}
+	staleAfter := cfg.SessionStaleAfter
+	if staleAfter <= 0 {
+		staleAfter = 5 * time.Minute
+	}
+	p := &Platform{
+		log:               log,
+		router:            router,
+		alloc:             alloc,
+		reconcileInterval: cfg.ReconcileInterval,
+		sessionStaleAfter: staleAfter,
+	}
 	p.Account = account.New(log.With("domain", "account"))
 	p.Team = team.New(log.With("domain", "team"))
 	p.Progress = progress.New(log.With("domain", "progress"))
@@ -121,5 +139,41 @@ func (p *Platform) Allocator() battlealloc.Allocator { return p.alloc }
 
 // Close releases resources. v0 holds none; the store layer will need it.
 func (p *Platform) Close() error { return nil }
+
+// ReconcileInterval reports the configured sweep period (0 = disabled). Useful
+// for startup logs and tests.
+func (p *Platform) ReconcileInterval() time.Duration { return p.reconcileInterval }
+
+// RunReconciler sweeps stale sessions until ctx is cancelled. It returns
+// immediately when the interval is zero, so callers can start it
+// unconditionally.
+//
+// A failed sweep is logged and retried on the next tick: the reconciler is a
+// safety net, and a database blip must not take the process down with it.
+func (p *Platform) RunReconciler(ctx context.Context) {
+	if p.reconcileInterval <= 0 {
+		return
+	}
+	p.log.Info("reconciler started", "interval", p.reconcileInterval, "stale_after", p.sessionStaleAfter)
+
+	ticker := time.NewTicker(p.reconcileInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			p.log.Info("reconciler stopped")
+			return
+		case now := <-ticker.C:
+			expired, err := p.Session.ExpireStale(ctx, now, p.sessionStaleAfter)
+			if err != nil {
+				p.log.Error("reconcile sweep failed", "err", err)
+				continue
+			}
+			if len(expired) > 0 {
+				p.log.Warn("expired stale sessions", "count", len(expired))
+			}
+		}
+	}
+}
 
 func (p *Platform) ready(context.Context) error { return nil }
