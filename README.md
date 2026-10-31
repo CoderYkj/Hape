@@ -98,18 +98,22 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 
 **未验证**（本机缺 docker / buf / make，且未接真实厂商）：
 
-- `Dockerfile` / `.dockerignore` / `deploy/docker-compose.yml`（含 `backend` 服务）：
-  本机没有 Docker，`docker build` 与 `compose up` 都没跑过；详见 `docs/deploy.md`
-- `nakama/modules`：独立 Go module，`nakama-common` 版本号为占位，
-  没编译过，没跑过
+- `docs/deploy.md` 里的生产发布流程：镜像是 CI 验过的，但**没有部署目标**
+  （没有 registry 之外的 k8s/systemd 清单，也从未部署到任何服务器）
+- Nakama 插件只验到"能编译成 `.so`"：**没有真的加载进 Nakama 跑过一次登录**
 - **没有生产数据库**：schema 只在本地实例与 CI 的临时容器上跑过，没有备份、
   复制、连接池调优与密码策略（`docs/postgres-local.md` 的"未验证/未做"一节）
 - `docs/ue5-ds-integration.md` 里的 C++ 片段：未在 UE5 工程里编译
 - 真实托管战斗服（GameLift / EdgeGap / Agones）：只有接口与桩实现
-- **CI 全绿**（GitHub Actions，`ubuntu-latest`）：`gofmt` / `go vet` / `go build` /
-  `go test -race`（含真 Postgres 里的七个等价性测试）/ schema 探针 / 契约漂移。
-  本机没有 C 编译器，`-race` 只能在这里真跑——所以它不是"本机已验证"，
+- **CI 全绿**（GitHub Actions，`ubuntu-latest`，4 个 job）：`gofmt` / `go vet` /
+  `go build` / `go test -race`（含真 Postgres 里的七个等价性测试）/ schema 探针 /
+  契约漂移。本机没有 C 编译器，`-race` 只能在这里真跑——所以它不是"本机已验证"，
   而是"CI 已验证"。
+- **镜像与编排**：CI 里 `docker build` 后以非 root（uid 10001）运行并探活；
+  `docker compose up postgres backend` 灌迁移、跑 35 条探针，并断言一次登录请求
+  真的落进了 `players` 表。
+- **Nakama 插件**：CI 里 `go build -buildmode=plugin` 编译通过（`nakama-common`
+  v1.35.0 已解析并提交 `go.sum`）。
 
 不要因为某文件"看起来完整"就假设它跑通了——以这一节为准。
 

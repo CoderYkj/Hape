@@ -165,6 +165,7 @@ CI 承担的是本机做不到的那部分：
 | `assert the database suites did not skip` | skip 与 pass 在汇总行里长得一样，所以 grep `SKIP:` 命中就让构建失败 |
 | `contract drift` | `apigen -check`：手改 `api/openapi/*.json` 会被挡下 |
 | `image` / `compose` 两个 job | 本机没有 Docker；CI 构建镜像、以非 root 跑起来探活，再拉起 compose（含 Postgres）、跑迁移与探针、并断言一次请求真的落了库 |
+| `nakama-module` job | 插件是 `package main` 但没有 `func main`，普通 `go build` 检查不了；CI 用 `-buildmode=plugin` 证明它仍能被 Nakama 加载 |
 
 本机那套（Windows、免安装 Postgres 16.4、端口 55432）见 `docs/postgres-local.md`。
 两套环境不同，**互不代表**：本机绿不等于 CI 绿，反之亦然。

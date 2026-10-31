@@ -12,6 +12,14 @@
 
 失败优先级：format → vet → build → test → contract。前一个失败不跑后面（省 CI 时间，错误更聚焦）。
 
+CI 除了 `verify` 还有三个 job，专做本机做不了的事：
+
+| job | 内容 |
+|---|---|
+| `image` | `docker build` → 非 root 运行 → `/healthz`·`/readyz`·`/metrics` → 断言 uid=10001 |
+| `compose` | `compose up postgres backend` → 迁移 → 35 条探针 → 断言一次登录落库 |
+| `nakama-module` | `go vet`（可移植类型检查）+ `go build -buildmode=plugin`（插件唯一可信的构建方式） |
+
 `-race` 在 CI 必开：这个后端到处是 `sync.Mutex` + map，数据竞争是真实风险，不是洁癖。
 
 ## 制品
