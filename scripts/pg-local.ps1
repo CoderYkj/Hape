@@ -20,11 +20,12 @@
 # docs/postgres-local.md for the caveats.
 [CmdletBinding()]
 param(
-    [ValidateSet('init', 'start', 'stop', 'status', 'migrate', 'probe', 'psql')]
+    [ValidateSet('init', 'start', 'stop', 'status', 'migrate', 'probe', 'grant', 'psql')]
     [string]$Action = 'status',
     [string]$PgHome = (Join-Path $env:USERPROFILE 'pgsql16'),
     [int]$Port = 55432,
     [string]$Database = 'gamebackend',
+    [string]$AppRole = 'gamebackend',
     [string]$Version = '16.4'
 )
 
@@ -128,6 +129,21 @@ switch ($Action) {
             Invoke-Psql @('-d', $Database, '-f', $_.FullName)
             Invoke-Psql @('-d', $Database, '-c', "INSERT INTO schema_migrations (version) VALUES ('$name')")
         }
+        # New tables need the application role's grants, or the first query from
+        # Go fails with "relation does not exist".
+        & $PSCommandPath -Action grant -PgHome $PgHome -Port $Port -Database $Database -AppRole $AppRole
+    }
+    'grant' {
+        # A schema re-created with DROP/CREATE does NOT grant USAGE to PUBLIC
+        # again, so the application role sees "relation does not exist" and
+        # "permission denied for schema public". Migrations define the schema;
+        # grants belong to the environment, hence a separate action.
+        Invoke-Psql @('-d', $Database, '-c', "GRANT USAGE ON SCHEMA public TO $AppRole") | Out-Null
+        Invoke-Psql @('-d', $Database, '-c', "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO $AppRole") | Out-Null
+        Invoke-Psql @('-d', $Database, '-c', "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO $AppRole") | Out-Null
+        Invoke-Psql @('-d', $Database, '-c', "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO $AppRole") | Out-Null
+        Invoke-Psql @('-d', $Database, '-c', "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO $AppRole") | Out-Null
+        Write-Host "granted schema/table/sequence privileges to $AppRole" -ForegroundColor Green
     }
     'probe' {
         Get-ChildItem (Join-Path $repo 'db/probes') -Filter '*.probe.sql' | Sort-Object Name | ForEach-Object {

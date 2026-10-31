@@ -38,6 +38,7 @@ func run() error {
 		DevAuth:           cfg.DevAuth,
 		ServiceToken:      cfg.ServiceToken,
 		Allocator:         cfg.Allocator,
+		DatabaseURL:       cfg.DatabaseURL,
 		ReconcileInterval: cfg.ReconcileInterval,
 		SessionStaleAfter: cfg.SessionStaleAfter,
 	})

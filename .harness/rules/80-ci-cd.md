@@ -47,6 +47,10 @@ Agent 边界：**不得**执行任何 staging/prod 部署命令。只允许本�
 - 迁移必须配探针：`db/probes/*.probe.sql` 断言"该拒的必须被拒"。本机用
   `scripts/pg-local.ps1 -Action probe` 跑；CI 目前没有 Postgres 服务，
   所以探针**不在 CI 里**，别把"CI 绿"当成 schema 已验证。
+- 同理：`services/*/store_equiv_test.go` 在无 `BACKEND_TEST_DATABASE_URL` 时 **skip**。
+  看到 `ok` 不等于 SQL 路径跑过，要看的是 `-run TestStoresAgree -v` 里没有 `SKIP`。
+- 想让这些进 CI，要给 workflow 加 `services: postgres:16` + 一次 `migrate`；这一步
+  尚未验证，别写成已完成。
 
 ## 发布检查单
 

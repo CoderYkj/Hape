@@ -25,7 +25,7 @@ git switch -c vibe/<slug>
 ## 需说明理由后执行
 
 ```bash
-go get <module>            # 违反 stdlib-only 政策，需先写 ADR
+go get <module>            # 新依赖需先写 ADR（当前只有 pgx，见 ADR 0006）
 go mod tidy                # 可能改动 go.sum
 go test -run . -race -count=10 ./...   # 耗时
 docker compose -f deploy/docker-compose.yml up
@@ -63,6 +63,27 @@ go run ./tools/apigen -check
 > `-race` 需要 cgo，也就是需要 C 编译器（Windows 上通常没有）。缺编译器时
 > `scripts/verify.ps1 -Race` 会打印 SKIP 并继续，不要把 SKIP 当成通过；
 > CI 的 Linux runner 自带 gcc，那里是真跑的。
+
+## 数据库相关
+
+```bash
+# 本机实例（Windows 免安装，见 docs/postgres-local.md）
+pwsh -File scripts/pg-local.ps1 -Action start|stop|status|migrate|probe|grant
+
+# 跑「内存实现 vs SQL 实现」等价性测试（无此变量则 skip）
+$env:BACKEND_TEST_DATABASE_URL = 'postgres://gamebackend:gamebackend@127.0.0.1:55432/gamebackend?sslmode=disable'
+go test -count=1 ./services/account/ ./services/economy/
+
+# 整个平台连真库跑一遍
+$env:BACKEND_DATABASE_URL = $env:BACKEND_TEST_DATABASE_URL
+go run ./cmd/platform   # 另一个终端：go run ./tools/fakeds
+```
+
+拉模块在直连 `proxy.golang.org` 不通的网络上需要镜像（`go.sum` 仍记录校验和）：
+
+```bash
+go env -w GOPROXY=https://goproxy.cn,direct GOSUMDB=off
+```
 
 失败处理：
 

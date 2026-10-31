@@ -57,7 +57,7 @@ tools/*          一次性工具（apigen、fakeds）
 
 ## 依赖政策
 
-- **v0 只用标准库**。新增第三方依赖必须先在 `.harness/adr/` 写一篇 ADR，说明：解决什么问题、维护状态、退出成本。
+- **依赖最小化**。当前唯一第三方依赖是 `github.com/jackc/pgx/v5`（ADR 0006，仅出现在 `pkg/pg` 与 `services/*/store_pg.go`）。新增任何依赖必须先在 `.harness/adr/` 写一篇 ADR，说明：解决什么问题、维护状态、退出成本。
 - 不引入 ORM、DI 框架、web 框架；`net/http` + `log/slog` + 手写装配足够。
 
 ## 存储

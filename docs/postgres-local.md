@@ -74,6 +74,27 @@ pwsh -File scripts/pg-local.ps1 -Action probe     # 跑 db/probes/*.probe.sql
   workflow 加 `services: postgres`，那一步没验证过。
 - 没有备份、没有复制、没有连接池调优、没有密码策略。
 
+## 两个会咬人的细节
+
+1. **授权属于环境，不属于 schema**。`DROP SCHEMA public; CREATE SCHEMA public` 之后，
+   新 schema 不再默认给 PUBLIC 权限，应用角色会报 `relation "wallets" does not exist`
+   与 `permission denied for schema public`。所以 `pg-local.ps1 -Action migrate` 会在
+   应用完迁移后自动跑一次 `-Action grant`（表、序列、schema、默认权限）。
+2. **扣费不能用 upsert**。PostgreSQL 在 `ON CONFLICT` 之前就校验 CHECK，
+   `INSERT ... ON CONFLICT DO UPDATE` 带负数会先在"假想的 0-60 行"上触发
+   `wallets_balance_check`。SQL store 因此对扣费使用带守卫的 `UPDATE`（见
+   `services/economy/store_pg.go` 与 ADR 0006 踩坑记录）。
+
+## 跑数据库相关测试
+
+```powershell
+$env:BACKEND_TEST_DATABASE_URL = 'postgres://gamebackend:gamebackend@127.0.0.1:55432/gamebackend?sslmode=disable'
+go test -count=1 -v ./services/account/ ./services/economy/
+```
+
+没有该变量时这些测试 **skip**，`go test ./...` 仍全绿——所以"CI 绿"不等于
+"数据库路径验证过"。
+
 ## 卸载
 
 ```powershell

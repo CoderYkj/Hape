@@ -18,6 +18,17 @@ go run ./tools/fakeds          # 另开一个终端：模拟一场完整对局
 结算发奖 -> 会话 finished`，并打印钱包/经验/评分变化。它同时也是一份
 可执行的接口用法文档。
 
+想让它真的落库（账号 + 经济两域已接 Postgres，其余仍是内存）：
+
+```powershell
+pwsh -File scripts/pg-local.ps1 -Action start
+pwsh -File scripts/pg-local.ps1 -Action migrate
+$env:BACKEND_DATABASE_URL = 'postgres://gamebackend:gamebackend@127.0.0.1:55432/gamebackend?sslmode=disable'
+go run ./cmd/platform
+```
+
+启动日志会打印每个域用的 store（`memory` 或 `postgres`），别靠猜。
+
 全量校验（格式 / vet / build / 测试 / 契约漂移）:
 
 ```bash
@@ -52,10 +63,11 @@ make verify                       # Linux / CI
 cmd/            进程入口（platform = 单体平台；rank = 拆分路径示范）
 platform/       装配层：把各服务挂到同一路由 + 结算扇出（sink.go）
 services/       7 个领域包，每个都有 DTO + Store 接口 + 内存实现 + 路由注册
-pkg/            基础设施：api(契约) / apierr(错误) / httpx(HTTP) / battlealloc(分配抽象)
+                已落库的域另有 store_pg.go（account、economy）与等价性测试
+pkg/            基础设施：api(契约) / apierr(错误) / httpx(HTTP) / battlealloc(分配抽象) / pg(驱动)
 tools/          apigen(生成 OpenAPI) / fakeds(假战斗服)
 api/openapi/    生成的接口契约（勿手改）
-db/migrations/  Postgres schema（已在 16.4 上执行；Go 侧尚未接线）
+db/migrations/  Postgres schema（已在 16.4 上执行；account/economy 已接线）
 db/probes/      schema 约束的断言脚本（35 条，psql 可重跑）
 nakama/         Nakama Go 模块（RPC 桥接，未验证）
 deploy/         docker-compose：postgres + backend + nakama（未验证）
@@ -76,6 +88,9 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 - `db/migrations/0001_init.sql` 在真实 Postgres 16.4 上执行成功（13 张表）；
   `db/probes/0001_constraints.probe.sql` **35 条约束断言全 PASS**
   （幂等键、余额非负、状态机守卫、一会话一战报、一人一队都被数据库拒绝）
+- **账号与经济已落库**：`platform` 连真库跑完 `fakeds` 全链路，`players` / `wallets` /
+  `ledger_entries` 出现对应行；`services/{account,economy}` 的「内存 vs SQL」等价性
+  测试逐步骤对齐（含拒绝分支）
 
 **未验证**（本机缺 docker / buf / make，且未接真实厂商）：
 
@@ -94,8 +109,9 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 
 ## 当前实现边界
 
-- 存储全部是内存实现（`services/*/store.go` 的 `Memory`），进程重启即丢；
-  `Store` 接口就是为换 Postgres 留的缝。
+- 存储分两半：**account 与 economy 在 Postgres**（`BACKEND_DATABASE_URL` 一设即生效），
+  team / matchmaking / session / progress / rank 仍是内存实现，进程重启即丢。
+  每个域的 `Store` 接口相同，所以迁一个域 = 加一个 `store_pg.go` + 一组等价性测试。
 - 分配器只有 `local` 实现（返回 `127.0.0.1:7777+n`）；厂商实现是返回
   `ErrNotConfigured` 的桩。
 - 单体单进程：7 个服务在同一个二进制里，按包边界隔离；`cmd/rank` 证明
@@ -112,7 +128,7 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 | 阶段 | 目标 |
 |---|---|
 | M0 ✅ | 垂直切片：单机跑通完整对局闭环（当前状态） |
-| M1 | 接 Postgres：把 `Memory` 换成 SQL 实现，跑本仓库的 migration |
+| M1 🚧 | 接 Postgres：account + economy 已落库，其余五个域按同模板跟进（spec 0002） |
 | M2 | 接真实托管分配器：填 `pkg/battlealloc` 的厂商实现（回收与超时对账的骨架已在 M0 里） |
 | M3 | Nakama 落地：账号/RPC 桥接跑通，客户端登录链路打通 |
 | M4 | 服务拆分：rank / matchmaking 独立进程，加 gRPC 或消息队列 |

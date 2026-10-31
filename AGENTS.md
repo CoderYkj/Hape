@@ -17,9 +17,9 @@
 
 一句话：**战斗中 UE5 DS 说了算，战斗之外 Go 说了算，Nakama 只做它擅长的社交与鉴权。**
 
-- 语言：Go（`go 1.23`，v0 只用标准库，无第三方依赖）
+- 语言：Go（`go 1.23`）。依赖最小化：唯一第三方依赖是 `pgx/v5`（ADR 0006），新增依赖必须先写 ADR
 - 传输：HTTP/JSON（v0），契约由 Go 声明自动生成 OpenAPI，gRPC 见 ADR 0004
-- 存储：v0 内存实现挂在 `Store` 接口后；Postgres 迁移见 `db/migrations`
+- 存储：account 与 economy 已落 Postgres（ADR 0006 / spec 0002），其余五个域仍是 `Store` 接口后的内存实现
 - 部署形态：v0 单进程模块化单体（`cmd/platform`），拆分路径见 ADR 0005
 - 主分支：`main`，Agent 分支前缀 `vibe/`
 

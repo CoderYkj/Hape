@@ -13,10 +13,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"gamebackend/pkg/api"
 	"gamebackend/pkg/battlealloc"
 	"gamebackend/pkg/httpx"
 	"gamebackend/pkg/logx"
+	"gamebackend/pkg/pg"
 	"gamebackend/services/account"
 	"gamebackend/services/economy"
 	"gamebackend/services/matchmaking"
@@ -41,6 +44,12 @@ type Config struct {
 	// string, and a server that silently falls back to it is worse than one
 	// that refuses to start.
 	Authenticator httpx.Authenticator
+	// DatabaseURL, when set, switches the economy store to PostgreSQL. Empty
+	// keeps the in-memory store, which is what tests and a bare `go run` use.
+	//
+	// M1 lands one domain at a time on purpose: a half-migrated backend that
+	// says which store it is running is easier to reason about than a big bang.
+	DatabaseURL string
 	// ReconcileInterval enables the stale-session sweep. Zero disables it.
 	ReconcileInterval time.Duration
 	// SessionStaleAfter is the allocating/ready age at which a session is
@@ -53,6 +62,7 @@ type Platform struct {
 	log               *slog.Logger
 	router            *httpx.Router
 	alloc             battlealloc.Allocator
+	pool              *pgxpool.Pool
 	reconcileInterval time.Duration
 	sessionStaleAfter time.Duration
 
@@ -100,10 +110,31 @@ func New(cfg Config) (*Platform, error) {
 		reconcileInterval: cfg.ReconcileInterval,
 		sessionStaleAfter: staleAfter,
 	}
-	p.Account = account.New(log.With("domain", "account"))
 	p.Team = team.New(log.With("domain", "team"))
 	p.Progress = progress.New(log.With("domain", "progress"))
-	p.Economy = economy.New(log.With("domain", "economy"))
+	// Accounts and economy move first (M1, ADR 0006): money carries a foreign key
+	// to players, so migrating one without the other would break payouts. The log
+	// line says which store each domain runs on, so nobody has to guess.
+	var economyStore economy.Store
+	var accountStore account.Store
+	if cfg.DatabaseURL != "" {
+		pool, err := pg.Open(context.Background(), cfg.DatabaseURL)
+		if err != nil {
+			return nil, fmt.Errorf("platform: open database: %w", err)
+		}
+		p.pool = pool
+		accountStore = account.NewPG(pool)
+		economyStore = economy.NewPG(pool)
+		log.Info("store selected", "domain", "account", "store", "postgres")
+		log.Info("store selected", "domain", "economy", "store", "postgres")
+	} else {
+		accountStore = account.NewMemory()
+		economyStore = economy.NewMemory()
+		log.Info("store selected", "domain", "account", "store", "memory")
+		log.Info("store selected", "domain", "economy", "store", "memory")
+	}
+	p.Account = account.NewWithStore(log.With("domain", "account"), accountStore)
+	p.Economy = economy.NewWithStore(log.With("domain", "economy"), economyStore)
 	p.Rank = rank.New(log.With("domain", "rank"))
 	p.Matchmaking = matchmaking.New(log.With("domain", "matchmaking"), p.Rank.Rating)
 	p.Session = session.New(log.With("domain", "session"), alloc, &matchSink{
@@ -137,8 +168,14 @@ func (p *Platform) Logger() *slog.Logger { return p.log }
 // Allocator is the battle allocator in use.
 func (p *Platform) Allocator() battlealloc.Allocator { return p.alloc }
 
-// Close releases resources. v0 holds none; the store layer will need it.
-func (p *Platform) Close() error { return nil }
+// Close releases resources: the database pool, once a store uses one.
+func (p *Platform) Close() error {
+	if p.pool != nil {
+		p.pool.Close()
+		p.pool = nil
+	}
+	return nil
+}
 
 // ReconcileInterval reports the configured sweep period (0 = disabled). Useful
 // for startup logs and tests.

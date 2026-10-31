@@ -46,6 +46,12 @@ func NewMemory() *Memory {
 }
 
 func (m *Memory) FindOrCreate(externalID, displayName string) (Player, bool, error) {
+	// Same guard as the SQL store: an empty external id would otherwise create an
+	// unauthenticatable account. Kept identical so the two stores agree.
+	if strings.TrimSpace(externalID) == "" {
+		return Player{}, false, apierr.Invalid("external_id is required").WithDetail("field", "external_id")
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
