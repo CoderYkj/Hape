@@ -188,3 +188,28 @@ jobs:
       - name: tear down
         if: always()
         run: docker compose -f deploy/docker-compose.yml down -v
+
+  # The Nakama plugin is a separate Go module with a separate toolchain requirement,
+  # and it is the one piece of the login path that had never been compiled. A plain
+  # `go build` cannot check it (a plugin has package main but no func main), so the
+  # only honest check is a plugin build - which needs Linux.
+  nakama-module:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: nakama/modules/go.mod
+          cache-dependency-path: nakama/modules/go.sum
+
+      - name: vet (type-check without linking)
+        working-directory: nakama/modules
+        run: go vet ./...
+
+      - name: build the plugin
+        working-directory: nakama/modules
+        run: |
+          go build -buildmode=plugin -o /tmp/gamemodule.so .
+          test -s /tmp/gamemodule.so
+          ls -l /tmp/gamemodule.so
