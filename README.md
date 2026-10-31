@@ -20,7 +20,7 @@ go run ./tools/fakeds          # 另开一个终端：模拟一场完整对局
 结算发奖 -> 会话 finished`，并打印钱包/经验/评分变化。它同时也是一份
 可执行的接口用法文档。
 
-想让它真的落库（账号 + 经济两域已接 Postgres，其余仍是内存）：
+想让它真的落库（七个域都已接 Postgres）：
 
 ```powershell
 scripts\pg-local.cmd -Action start
@@ -101,7 +101,8 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
   本机没有 Docker，`docker build` 与 `compose up` 都没跑过；详见 `docs/deploy.md`
 - `nakama/modules`：独立 Go module，`nakama-common` 版本号为占位，
   没编译过，没跑过
-- Go 侧没有一行连数据库：7 个服务仍是内存存储（M1 的事，先定驱动，见 ADR 0006）
+- **没有生产数据库**：schema 只在本地实例与 CI 的临时容器上跑过，没有备份、
+  复制、连接池调优与密码策略（`docs/postgres-local.md` 的"未验证/未做"一节）
 - `docs/ue5-ds-integration.md` 里的 C++ 片段：未在 UE5 工程里编译
 - 真实托管战斗服（GameLift / EdgeGap / Agones）：只有接口与桩实现
 - **CI 全绿**（GitHub Actions，`ubuntu-latest`）：`gofmt` / `go vet` / `go build` /
@@ -143,7 +144,7 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 |---|---|
 | M0 ✅ | 垂直切片：单机跑通完整对局闭环（当前状态） |
 | M1 ✅ | 接 Postgres：7/7 域落库，14 张表全部有写入，等价性测试对齐（spec 0002） |
-| M2 | 接真实托管分配器：填 `pkg/battlealloc` 的厂商实现（回收与超时对账的骨架已在 M0 里） |
+| M2 | 接真实托管分配器：填 `pkg/battlealloc` 的厂商实现（回收与超时对账已接，缺的是厂商侧确认） |
 | M3 | Nakama 落地：账号/RPC 桥接跑通，客户端登录链路打通 |
 | M4 | 服务拆分：rank / matchmaking 独立进程，加 gRPC 或消息队列 |
 | M5 | 可观测性与容量：指标落地、压测、SLO |

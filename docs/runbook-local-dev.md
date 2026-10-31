@@ -88,14 +88,14 @@ Go 缓存写进了仓库或系统盘满。verify 脚本把 `GOCACHE`/`GOMODCACHE
 dev 模式下 token 必须是 `dev-player-<player_id>` 或 `dev-service`；
 玩家 token 打服务接口会 401（这是设计，不是 bug）。
 
-## 6. 接入真实 Nakama（M1 之后）
+## 6. 接入真实 Nakama（M3）
 
 1. 起 Postgres + Nakama（见 `deploy/docker-compose.yml`，未验证）。
 2. 把 `nakama/modules/` 编译成 `.so` 放进 Nakama 的 `data/modules/`（需要联网拉依赖）。
 3. `BACKEND_DEV_AUTH=false` + 真实 `BACKEND_SERVICE_TOKEN`。
 4. Nakama 的登录钩子把外部身份转发到 `POST /v1/account/sessions`。
 
-## 7. 接入真实托管战斗服（M3 之后）
+## 7. 接入真实托管战斗服（M2）
 
 1. 在 `pkg/battlealloc` 实现一个适配器（满足 `Allocator` 三个方法）。
 2. 在 `battlealloc.New` 里挂上名字。

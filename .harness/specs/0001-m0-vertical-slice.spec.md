@@ -68,7 +68,7 @@ M0 建立 21 个 op，分属 7 个服务（见 `api/openapi/*.json`）。摘要�
 内存实现：`services/*/store.go`。字段与 `api.T(...)` 反射出的 schema 一致。
 SQL schema 见 `db/migrations/0001_init.sql`：已在 Postgres 16.4 上执行，
 约束由 `db/probes/0001_constraints.probe.sql` 断言（35 条全 PASS）。
-Go 侧仍用内存实现，接线是 M1（驱动选型见 ADR 0006）。
+M0 时点 Go 侧仍是内存实现；**M1 已完成**（7/7 域落库，见 spec 0002 / ADR 0006）。
 
 ## 6. 不变量与失败模式
 

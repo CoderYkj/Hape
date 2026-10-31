@@ -47,7 +47,9 @@ type Allocator interface {
 负面：
 
 - **抽象会漏**：托管厂商的独有概念（GameLift 的 fleet/game session、Edgegap 的 deployment request、Agones 的 CRD）无法完全塞进 `Request/Allocation`，接的时候大概率要给接口加字段。
-- **`Release` 尚未接线**：v0 分配后不释放（本地无成本），接真实厂商时必须在结束/超时时调用，否则按秒计费空转。
+- **`Release` 尚未接线**（写于 M0 时点）。**后续状态**：已在结算成功与超时清理两条路径接上
+  （`session.submitResult` / `session.ExpireStale`），均为 best-effort + 告警日志；
+  还缺的是"厂商侧确认回收成功"。见 90 文档待定项。
 - `Unconfigured` 的报错会在 staging 才暴露（这是设计意图：早失败），但意味着配置错误不会被本地测试发现。
 
 ## 触发重新评估的条件

@@ -79,9 +79,13 @@ BACKEND_BASE_URL=http://backend:8080 \
 | 5432 | Postgres |
 | 7350 / 7351 / 7349 | Nakama client API / console / gRPC |
 
-**注意**：`backend` 服务今天**不** `depends_on: postgres`——v0 的存储全在内存，
-它跟数据库还没关系。M1 接上 SQL store 后才加这个依赖和 `BACKEND_DATABASE_URL`。
-现在写上去只会让人误以为"存档已持久化"。
+**注意**：`backend` 服务今天**没有** `depends_on: postgres`，也**没有**设
+`BACKEND_DATABASE_URL`——虽然后端七个域都支持 Postgres，但这套 compose 里还没有
+一个给后端用的数据库（现成的 `postgres` 服务只建了 `nakama` 库）。
+
+补法是加一个 `/docker-entrypoint-initdb.d/*.sql` 建 `gamebackend` 库与角色，然后
+`backend` 加 `depends_on: postgres` 和 `BACKEND_DATABASE_URL=postgres://...@postgres:5432/gamebackend`。
+这一步没有 Docker 无法验证，所以列在待补清单里，而不是写成已经配好。
 
 ## 5. 环境变量矩阵
 
@@ -162,4 +166,5 @@ M0 没有可部署目标，所以这一步是模板，不是已验证的流水�
 2. 生产 `Authenticator`（Nakama JWT 校验），有了它 `prod` 才可能真的启动
 3. `db/migrations/0001_init.sql` 的**生产执行路径**（本机已验证可执行；生产需要
    runner 或部署步骤，且要与 SQL store 同批上线）
-4. Kubernetes / 单机 systemd 的清单：现在只有 compose，没有生产编排
+4. compose 里后端的数据库接线（建库 init 脚本 + `BACKEND_DATABASE_URL`），见第 4 节注意
+5. Kubernetes / 单机 systemd 的清单：现在只有 compose，没有生产编排

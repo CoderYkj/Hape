@@ -121,7 +121,8 @@ void UDsBackendClient::ReportResult(const FString& SessionId, const TArray<FPlay
 ```
 
 客户端拿不到 session id 时的兜底：`get_ticket` 返回 `match_id` 后，后端应能按 match 反查
-session（v0 未实现，属 M4 补的查询接口）。
+session。这个读接口目前**没有实现**，也不属于任何里程碑——补的时候就是一次
+`GET /v1/session/sessions?match_id=`（契约先行，`session` 服务加一个 op）。
 
 ## 6. 没有 UE5 时怎么联调
 
