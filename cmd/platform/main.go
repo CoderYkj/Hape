@@ -37,6 +37,8 @@ func run() error {
 		LogLevel:          cfg.LogLevel,
 		DevAuth:           cfg.DevAuth,
 		ServiceToken:      cfg.ServiceToken,
+		JWTKey:            cfg.JWTKey,
+		JWTIssuer:         cfg.JWTIssuer,
 		Allocator:         cfg.Allocator,
 		DatabaseURL:       cfg.DatabaseURL,
 		ReconcileInterval: cfg.ReconcileInterval,

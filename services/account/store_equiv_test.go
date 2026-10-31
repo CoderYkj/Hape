@@ -86,6 +86,20 @@ func TestStoresAgree(t *testing.T) {
 				t.Fatalf("updated_at went backwards: %v -> %v", first.UpdatedAt, renamed.UpdatedAt)
 			}
 
+			// Authentication resolves a verified identity to a player, and it must be
+			// read-only: looking up an unknown identity reports not_found instead of
+			// creating an account.
+			byExternal, err := store.LookupByExternalID(ctx, externalID)
+			if err != nil {
+				t.Fatalf("LookupByExternalID: %v", err)
+			}
+			if byExternal.ID != first.ID {
+				t.Fatalf("LookupByExternalID returned %q, want %q", byExternal.ID, first.ID)
+			}
+			if _, err := store.LookupByExternalID(ctx, "ext-does-not-exist"); apierr.As(err).Code != apierr.CodeNotFound {
+				t.Fatalf("unknown identity: code = %q, want not_found", apierr.As(err).Code)
+			}
+
 			// Refusals must agree too.
 			if _, err := store.GetByID(ctx, "p_missing"); apierr.As(err).Code != apierr.CodeNotFound {
 				t.Fatalf("unknown player: code = %q, want not_found", apierr.As(err).Code)

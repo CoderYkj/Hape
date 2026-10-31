@@ -81,6 +81,20 @@ func (s *PG) GetByID(ctx context.Context, id string) (Player, error) {
 	return player, err
 }
 
+// LookupByExternalID implements Store.
+func (s *PG) LookupByExternalID(ctx context.Context, externalID string) (Player, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
+	player, err := s.scanPlayer(s.pool.QueryRow(ctx,
+		`SELECT id, external_id, display_name, created_at, updated_at
+		   FROM players WHERE external_id = $1`, externalID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Player{}, apierr.NotFound("player not found").WithDetail("external_id", externalID)
+	}
+	return player, err
+}
+
 // UpdateDisplayName implements Store.
 func (s *PG) UpdateDisplayName(ctx context.Context, id, displayName string) (Player, error) {
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)

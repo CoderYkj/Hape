@@ -8,10 +8,13 @@ import (
 	"gamebackend/pkg/apierr"
 )
 
-// Principal is the authenticated caller. Exactly one field is set.
+// Principal is the authenticated caller. For a player, both fields are set: the
+// backend player id (what the API exposes) and the external identity that produced
+// it (Nakama's user id, useful for logs and support).
 type Principal struct {
-	PlayerID string
-	Service  string
+	PlayerID   string
+	ExternalID string
+	Service    string
 }
 
 // IsPlayer reports whether the caller is an end player.

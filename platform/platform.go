@@ -39,11 +39,13 @@ type Config struct {
 	ServiceToken string
 	Allocator    string
 	Logger       *slog.Logger
-	// Authenticator overrides the development authenticator. Production must
-	// inject one: DevAuth is a local-development shim that trusts a bearer
-	// string, and a server that silently falls back to it is worse than one
-	// that refuses to start.
+	// Authenticator overrides the built-in choice entirely (tests, or a deployment
+	// with its own identity provider).
 	Authenticator httpx.Authenticator
+	// JWTKey is Nakama's session encryption key. Required when DevAuth is false.
+	JWTKey string
+	// JWTIssuer, when set, is checked against the token's `iss`.
+	JWTIssuer string
 	// DatabaseURL, when set, switches the economy store to PostgreSQL. Empty
 	// keeps the in-memory store, which is what tests and a bare `go run` use.
 	//
@@ -85,18 +87,6 @@ func New(cfg Config) (*Platform, error) {
 		return nil, fmt.Errorf("platform: refusing to start in prod with dev auth")
 	}
 
-	// Two distinct mistakes, two distinct errors: asking for non-dev auth and
-	// giving nothing to replace it with, versus asking for prod plus dev auth.
-	auth := cfg.Authenticator
-	if auth == nil {
-		if !cfg.DevAuth {
-			return nil, fmt.Errorf("platform: dev auth is disabled and no production " +
-				"Authenticator was injected (see ADR 0001 / M3)")
-		}
-		auth = httpx.NewDevAuth(cfg.ServiceToken)
-	}
-
-	router := httpx.NewRouter("platform", log, auth)
 	alloc := battlealloc.New(cfg.Allocator)
 
 	staleAfter := cfg.SessionStaleAfter
@@ -105,7 +95,6 @@ func New(cfg Config) (*Platform, error) {
 	}
 	p := &Platform{
 		log:               log,
-		router:            router,
 		alloc:             alloc,
 		reconcileInterval: cfg.ReconcileInterval,
 		sessionStaleAfter: staleAfter,
@@ -157,6 +146,37 @@ func New(cfg Config) (*Platform, error) {
 	for _, domain := range []string{"account", "team", "matchmaking", "session", "progress", "economy", "rank"} {
 		log.Info("store selected", "domain", domain, "store", store)
 	}
+	// Authentication comes after the stores because a real JWT authenticator needs
+	// to resolve Nakama's user id to a backend player id, which is the account
+	// store's job. Dev auth needs nothing.
+	auth := cfg.Authenticator
+	if auth == nil {
+		if cfg.DevAuth {
+			auth = httpx.NewDevAuth(cfg.ServiceToken)
+			log.Info("auth selected", "mode", "dev")
+		} else {
+			jwtAuth, err := httpx.NewJWTAuth(httpx.JWTAuthConfig{
+				SecurityKey:  []byte(cfg.JWTKey),
+				ServiceToken: cfg.ServiceToken,
+				Issuer:       cfg.JWTIssuer,
+				Resolve: func(ctx context.Context, externalID string) (string, error) {
+					player, err := accountStore.LookupByExternalID(ctx, externalID)
+					if err != nil {
+						return "", err
+					}
+					return player.ID, nil
+				},
+			})
+			if err != nil {
+				return nil, fmt.Errorf("platform: production authenticator: %w", err)
+			}
+			auth = jwtAuth
+			log.Info("auth selected", "mode", "jwt")
+		}
+	}
+	router := httpx.NewRouter("platform", log, auth)
+	p.router = router
+
 	p.Account = account.NewWithStore(log.With("domain", "account"), accountStore)
 	p.Team = team.NewWithStore(log.With("domain", "team"), teamStore)
 	p.Economy = economy.NewWithStore(log.With("domain", "economy"), economyStore)

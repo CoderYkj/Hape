@@ -20,6 +20,8 @@ type Config struct {
 	LogLevel     string
 	DevAuth      bool
 	ServiceToken string
+	JWTKey       string // Nakama session encryption key; required when DevAuth is off
+	JWTIssuer    string // optional `iss` check
 	Allocator    string // local | gamelift | edgegap | agones
 	DatabaseURL  string // empty in v0: stores are in memory
 	BatchRegions []string
@@ -51,6 +53,8 @@ func Load(service, defaultAddr string) (Config, error) {
 		LogLevel:          envOr("LOG_LEVEL", "info"),
 		DevAuth:           envOr("BACKEND_DEV_AUTH", "true") == "true",
 		ServiceToken:      os.Getenv("BACKEND_SERVICE_TOKEN"),
+		JWTKey:            os.Getenv("BACKEND_JWT_KEY"),
+		JWTIssuer:         os.Getenv("BACKEND_JWT_ISSUER"),
 		Allocator:         envOr("BACKEND_ALLOCATOR", "local"),
 		DatabaseURL:       os.Getenv("BACKEND_DATABASE_URL"),
 		BatchRegions:      splitList(envOr("BACKEND_REGIONS", "local")),
@@ -74,6 +78,9 @@ func (c Config) Validate() error {
 	}
 	if !c.IsProd() && !c.DevAuth && c.ServiceToken == "" {
 		return fmt.Errorf("BACKEND_DEV_AUTH=false requires BACKEND_SERVICE_TOKEN")
+	}
+	if !c.DevAuth && c.JWTKey == "" {
+		return fmt.Errorf("BACKEND_DEV_AUTH=false requires BACKEND_JWT_KEY (Nakama session encryption key)")
 	}
 	if c.ReconcileInterval < 0 {
 		return fmt.Errorf("BACKEND_RECONCILE_INTERVAL must not be negative, got %s", c.ReconcileInterval)

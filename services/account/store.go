@@ -29,6 +29,10 @@ type Player struct {
 type Store interface {
 	FindOrCreate(ctx context.Context, externalID, displayName string) (player Player, created bool, err error)
 	GetByID(ctx context.Context, id string) (Player, error)
+	// LookupByExternalID is the read-only side of FindOrCreate: authentication uses
+	// it to turn a verified identity into a player id, and authentication must never
+	// create accounts as a side effect.
+	LookupByExternalID(ctx context.Context, externalID string) (Player, error)
 	UpdateDisplayName(ctx context.Context, id, displayName string) (Player, error)
 }
 
@@ -83,6 +87,16 @@ func (m *Memory) GetByID(_ context.Context, id string) (Player, error) {
 		return Player{}, apierr.NotFound("player not found").WithDetail("player_id", id)
 	}
 	return player, nil
+}
+
+func (m *Memory) LookupByExternalID(_ context.Context, externalID string) (Player, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	id, ok := m.byExternal[externalID]
+	if !ok {
+		return Player{}, apierr.NotFound("player not found").WithDetail("external_id", externalID)
+	}
+	return m.byID[id], nil
 }
 
 func (m *Memory) UpdateDisplayName(_ context.Context, id, displayName string) (Player, error) {

@@ -97,7 +97,9 @@ BACKEND_BASE_URL=http://backend:8080 \
 | `BACKEND_ADDR` | `:8080`（`cmd/platform` 传入） | 监听地址；容器里用 `0.0.0.0:8080` |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `BACKEND_DEV_AUTH` | `true` | `true` 时挂 `DevAuth`；`false` 时必须注入真实认证器，否则拒绝启动 |
-| `BACKEND_SERVICE_TOKEN` | 空 | 服务间 token；`prod` 或关闭 dev auth 时必填 |
+| `BACKEND_SERVICE_TOKEN` | 空 | 服务间 token；关闭 dev auth 时必填（服务调用仍用它，不用 JWT） |
+| `BACKEND_JWT_KEY` | 空 | Nakama 的 session 加密密钥（HS256）；`BACKEND_DEV_AUTH=false` 时必填 |
+| `BACKEND_JWT_ISSUER` | 空 | 非空时校验 token 的 `iss`（Nakama 默认发 `nakama`） |
 | `BACKEND_ALLOCATOR` | `local` | `local` / `gamelift` / `edgegap` / `agones`；后三者是返回 `ErrNotConfigured` 的桩 |
 | `BACKEND_DATABASE_URL` | 空 | 非空时**全部七个域**走 Postgres；空则全部内存（重启即丢） |
 | `BACKEND_REGIONS` | `local` | 逗号分隔的区域列表 |
@@ -107,8 +109,10 @@ BACKEND_BASE_URL=http://backend:8080 \
 两条硬规则（`Config.Validate` 与 `platform.New` 各拦一条）：
 
 1. `BACKEND_ENV=prod` 且 `BACKEND_DEV_AUTH=true` → 裸启动就失败。
-2. `BACKEND_DEV_AUTH=false` 且没有注入 `Authenticator` → 启动失败，**不会**悄悄
-   退回 dev bearer token。生产认证器属于 M3（Nakama JWT 校验）。
+2. `BACKEND_DEV_AUTH=false` → 启动时校验 `BACKEND_JWT_KEY` 与 `BACKEND_SERVICE_TOKEN`，
+   缺一个就失败；**不会**悄悄退回 dev bearer token。JWT 模式已实现（`pkg/httpx/jwtauth.go`）：
+   校验 Nakama 的 HS256 签名、`exp`/`iat`、可选 `iss`/`aud`，再把 Nakama 用户 id
+   解析成后端 player id（`account.LookupByExternalID`，只读，不会建号）。
 
 ## 6. 探针语义
 
@@ -128,8 +132,9 @@ M0 没有可部署目标，所以这一步是模板，不是已验证的流水�
 1. **定镜像版本**：用 git short sha 或语义版本，不用 `latest`（`latest` 无法回滚）。
 2. **构建 + 打标**：`docker build -t <registry>/gamebackend:<tag> .`
 3. **推送到 registry**（待办：还没有 registry）。
-4. **部署**：`BACKEND_ENV=prod`、`BACKEND_DEV_AUTH=false`、`BACKEND_SERVICE_TOKEN=<secret>`；
-   注意第 5 节第 2 条——M3 之前这样配会**启动失败**，这是正确的失败。
+4. **部署**：`BACKEND_ENV=prod`、`BACKEND_DEV_AUTH=false`、`BACKEND_SERVICE_TOKEN=<secret>`、
+   `BACKEND_JWT_KEY=<Nakama 的 session 加密密钥>`；缺 `BACKEND_JWT_KEY` 会**启动失败**，
+   这是正确的失败（宁可起不来，也不要拿 dev token 上生产）。
 5. **验证**：`/healthz` 200、`/readyz` 200、`/metrics` 里能看到请求计数、日志一行一请求。
 6. **观察 5 分钟**：5xx 比例、`backend_requests_total` 是否有异常操作码。
 
