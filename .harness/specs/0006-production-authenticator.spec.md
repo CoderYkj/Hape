@@ -93,6 +93,7 @@ body），把现在这个标记为 dev-only。**这会改变一个 op 的认证�
 
 ## 8. 未决
 
-- [ ] `account.login` 的认证级别（见第 6 节，需要拍板）
+- [x] `account.login` 的认证级别（见第 6 节）→ **已决定延后**（2026-01-01）：
+  当前由 Nakama 插件用服务凭证调用；重开条件见 README「已知缺口」。
 - [ ] Nakama 若改用 RS256（多实例/轮换密钥），需要加 JWKS 拉取与缓存
 - [ ] 是否记录 `Principal.ExternalID` 到访问日志（现在日志只有请求行的 op/status）
