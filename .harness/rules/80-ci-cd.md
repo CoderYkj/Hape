@@ -51,6 +51,9 @@ Agent 边界：**不得**执行任何 staging/prod 部署命令。只允许本�
 - **CI 有 Postgres**：workflow 起 `postgres:16` service，依次 `migrate` →
   `schema probes` → `go test -race ./...`（带 `BACKEND_TEST_DATABASE_URL`）。
   所以 CI 绿 = race 跑过 + 七个等价性测试在真库上跑过 + 约束探针通过。
+- CI 还会**断言这些测试没有 skip**（`assert the database suites did not skip`）：
+  跳过的测试和通过的测试在汇总行里长得一样，所以这一步会 grep `SKIP:` 并让构建失败。
+  取消这条检查等于取消整条数据库验证。
 
 ## 发布检查单
 
