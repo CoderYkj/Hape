@@ -9,6 +9,9 @@ package session
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -77,6 +80,11 @@ type CreateSessionRequest struct {
 // CreateSessionResponse returns the session in the allocating state.
 type CreateSessionResponse struct {
 	Session Session `json:"session"`
+	// RuntimeToken is the per-session credential the dedicated server presents when
+	// it reports ready/results. Returned here (and only here) so a caller acting as
+	// the DS - fakeds, or an operator debugging - can authenticate. The player-facing
+	// read path never includes it.
+	RuntimeToken string `json:"runtime_token" doc:"Per-session DS credential; also injected into the instance."`
 }
 
 // MarkReadyRequest is the body of POST /v1/session/sessions/{session_id}/ready.
@@ -135,6 +143,7 @@ func (s *Service) Register(r *httpx.Router) {
 		Response:   api.T(MarkReadyResponse{}),
 		Auth:       api.AuthService,
 		Idempotent: true,
+		Note:       "Requires the service token AND the session's X-Session-Token header: the first proves a trusted process, the second proves this is the DS of that match.",
 	}, s.markReady)
 
 	r.Handle(api.Op{
@@ -147,7 +156,7 @@ func (s *Service) Register(r *httpx.Router) {
 		Response:   api.T(SubmitResultResponse{}),
 		Auth:       api.AuthService,
 		Idempotent: true,
-		Note:       "Idempotent by result_id. Downstream fan-out runs before the session is marked finished, so a retry re-runs idempotent sinks.",
+		Note:       "Idempotent by result_id; requires the service token AND the session's X-Session-Token. Downstream fan-out runs inside one transaction, so a retry re-runs idempotent sinks.",
 	}, s.submitResult)
 
 	r.Handle(api.Op{
@@ -179,27 +188,36 @@ func (s *Service) create(r *http.Request) (any, error) {
 	// Time-based, not a process-local counter: with a persistent store, s_1 from
 	// the previous process is still on disk, and a counter restarts at 1.
 	id := "s_" + strconv.FormatInt(s.now().UnixNano(), 36)
-	_, err := s.store.Create(r.Context(), Session{
-		ID:        id,
-		MatchID:   req.MatchID,
-		State:     StateAllocating,
-		Players:   req.Players,
-		Queue:     req.Queue,
-		Region:    req.Region,
-		Map:       req.Map,
-		CreatedAt: s.now().UTC(),
+	// Minted before allocation on purpose: a managed provider injects it into the
+	// instance environment, so it has to exist by the time we ask for a server.
+	runtimeToken, err := newRuntimeToken()
+	if err != nil {
+		return nil, apierr.Internal("could not mint a session token").WithCause(err)
+	}
+
+	_, err = s.store.Create(r.Context(), Session{
+		ID:           id,
+		MatchID:      req.MatchID,
+		State:        StateAllocating,
+		Players:      req.Players,
+		Queue:        req.Queue,
+		Region:       req.Region,
+		Map:          req.Map,
+		RuntimeToken: runtimeToken,
+		CreatedAt:    s.now().UTC(),
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	allocation, err := s.alloc.Allocate(r.Context(), battlealloc.Request{
-		SessionID:  id,
-		MatchID:    req.MatchID,
-		Queue:      req.Queue,
-		Region:     req.Region,
-		Map:        req.Map,
-		MaxPlayers: len(req.Players),
+		SessionID:    id,
+		MatchID:      req.MatchID,
+		Queue:        req.Queue,
+		Region:       req.Region,
+		Map:          req.Map,
+		MaxPlayers:   len(req.Players),
+		RuntimeToken: runtimeToken,
 	})
 	if err != nil {
 		_, _ = s.store.Update(r.Context(), id, func(sp *Session) error {
@@ -222,7 +240,7 @@ func (s *Service) create(r *http.Request) (any, error) {
 	}
 	s.log.InfoContext(r.Context(), "session allocating", "session_id", id, "match_id", req.MatchID,
 		"provider", allocation.Provider, "address", allocation.Address)
-	return CreateSessionResponse{Session: updated}, nil
+	return CreateSessionResponse{Session: updated, RuntimeToken: updated.RuntimeToken}, nil
 }
 
 func (s *Service) markReady(r *http.Request) (any, error) {
@@ -232,6 +250,14 @@ func (s *Service) markReady(r *http.Request) (any, error) {
 	sessionID := httpx.Param(r, "session_id")
 	var req MarkReadyRequest
 	if err := httpx.Decode(r, &req); err != nil {
+		return nil, err
+	}
+
+	current, err := s.store.Get(r.Context(), sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireRuntimeToken(r, current.RuntimeToken); err != nil {
 		return nil, err
 	}
 
@@ -278,6 +304,12 @@ func (s *Service) submitResult(r *http.Request) (any, error) {
 
 	current, err := s.store.Get(r.Context(), sessionID)
 	if err != nil {
+		return nil, err
+	}
+	// Dual credentials (ADR 0007 adjacent decision): the service token proves "a
+	// trusted process", the session token proves "the DS of *this* match". A
+	// compromised instance can therefore only speak for its own session.
+	if err := requireRuntimeToken(r, current.RuntimeToken); err != nil {
 		return nil, err
 	}
 	if current.ResultID == req.ResultID {
@@ -431,12 +463,38 @@ func (s *Service) get(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Never hand the report credential to a player.
+	found.RuntimeToken = ""
 	for _, id := range found.Players {
 		if id == playerID {
 			return GetSessionResponse{Session: found}, nil
 		}
 	}
 	return nil, apierr.PermissionDenied("player is not in this session")
+}
+
+// newRuntimeToken mints the per-session credential: 32 random bytes, URL-safe so it
+// survives being pasted into an env var and a header.
+func newRuntimeToken() (string, error) {
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
+}
+
+// requireRuntimeToken enforces the per-session credential. A session without one is
+// refused rather than accepted: fail closed, because the only way to have no token
+// is a session created by an older build or a corrupted row.
+func requireRuntimeToken(r *http.Request, want string) error {
+	if want == "" {
+		return apierr.Unauthenticated("session has no runtime token; recreate the session")
+	}
+	presented := r.Header.Get("X-Session-Token")
+	if subtle.ConstantTimeCompare([]byte(presented), []byte(want)) != 1 {
+		return apierr.Unauthenticated("missing or invalid X-Session-Token")
+	}
+	return nil
 }
 
 func validatePlayers(players []string) error {

@@ -36,8 +36,12 @@ type Request struct {
 	MaxPlayers int
 	// IPs are the players' addresses, used by providers that pick a nearby edge
 	// location. Optional: an empty list means "provider decides".
-	IPs  []string
-	Meta map[string]string
+	IPs []string
+	// RuntimeToken is the per-session credential the dedicated server must present
+	// when it reports ready/results. Adapters inject it into the instance
+	// environment; the platform mints it, the provider only carries it.
+	RuntimeToken string
+	Meta         map[string]string
 }
 
 // Allocation is a granted dedicated server.
@@ -84,7 +88,7 @@ func (l *Local) Allocate(_ context.Context, req Request) (Allocation, error) {
 		Provider:  "local",
 		Address:   l.addr,
 		Port:      l.port + int(n%64),
-		Token:     "local-" + req.SessionID,
+		Token:     firstNonEmptyOr("local-"+req.SessionID, req.RuntimeToken),
 		ExpiresAt: time.Now().Add(30 * time.Minute),
 	}, nil
 }
@@ -121,4 +125,13 @@ func New(provider string) Allocator {
 	default:
 		return Unconfigured{Name: provider}
 	}
+}
+
+// firstNonEmptyOr prefers the caller-supplied value: the local allocator must hand
+// back the same per-session token the backend stored, or the DS cannot authenticate.
+func firstNonEmptyOr(fallback, preferred string) string {
+	if preferred != "" {
+		return preferred
+	}
+	return fallback
 }

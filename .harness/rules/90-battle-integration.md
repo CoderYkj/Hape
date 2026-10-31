@@ -187,7 +187,7 @@ BACKEND_ALLOCATOR=gamelift go run ./cmd/platform
 
 | 项 | 现状 | 需要做什么 |
 |---|---|---|
-| DS ↔ 后端认证 | 共享 `dev-service` token | per-allocation 短期 token 或 mTLS |
+| DS ↔ 后端认证 | 双凭证：service token（进程）+ 每场 `X-Session-Token`（会话） | 凭证轮换 / mTLS；真机确认 Edgegap 注入生效 |
 | 会话回收 | 已接：结束 + 超时两条路径（best-effort） | 厂商侧确认回收成功（现在只记日志） |
 | 僵尸会话对账 | 已接：平台内定时器，opt-in | 多实例部署时的单活选主；`in_progress` 的时长上限 |
 | 玩家进入事件 | ready 直接可结算 | DS 上报 `in_progress` |

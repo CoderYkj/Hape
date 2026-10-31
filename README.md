@@ -151,7 +151,7 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 | 缺口 | 为什么危险 | 关闭方式 |
 |---|---|---|
 | `account.login` 仍是公共 op，信任 body 里的 `external_id` | 任何人可以声称自己是任意 Nakama 用户，凭空拿到那个玩家的后端 id 与 token | 新增"用 JWT 换后端身份"的 op（`AuthPlayer`，身份取自 token 而非 body），把现在这个降级为仅 dev；属于改契约，需要先拍板 |
-| 服务间认证是共享静态 token | 一个泄露的 token 就能伪造战报 | per-allocation token（M2，`sessions.runtime_token` 字段已建） |
+| 服务间认证仍是共享静态 token | 一个泄露的 token 能调用其它 service 接口（但不能伪造别的场次的战报——上报已要求每场 `X-Session-Token`，spec 0008） | 凭证轮换或 mTLS（M4） |
 | 没有生产数据库运维 | 无备份、复制、连接池调优、密码策略 | 运维上车时补，见 `docs/postgres-local.md` 的"未验证/未做" |
 | `nakama/modules` 从未编译通过 | 登录链路在生产里跑不起来 | CI 里加了编译步骤（见第 3 项），失败就修 |
 

@@ -213,6 +213,9 @@ func (e *Edgegap) deploy(ctx context.Context, req Request) (string, error) {
 		"env_vars": []map[string]any{
 			{"key": "SESSION_ID", "value": req.SessionID},
 			{"key": "MATCH_ID", "value": req.MatchID},
+			// The DS authenticates its report with this, not with the shared service
+			// token. Hidden so it does not surface in the provider's UI.
+			{"key": "RUNTIME_TOKEN", "value": req.RuntimeToken, "is_hidden": true},
 		},
 	}
 	if e.version != "" {

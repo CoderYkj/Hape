@@ -67,6 +67,8 @@ type harness struct {
 	app   *Service
 	store Store
 	auth  string
+	// token is the per-session DS credential of the most recent createSession call.
+	token string
 }
 
 func newHarness(t *testing.T, alloc battlealloc.Allocator, sink ResultSink) *harness {
@@ -83,7 +85,7 @@ func newHarness(t *testing.T, alloc battlealloc.Allocator, sink ResultSink) *har
 
 // do issues one request and returns the status plus the decoded body (nil for
 // non-JSON responses, which this package never produces).
-func (h *harness) do(method, path string, body any, token string) (int, map[string]any) {
+func (h *harness) do(method, path string, body any, token string, headers ...string) (int, map[string]any) {
 	h.t.Helper()
 	var reader io.Reader
 	if body != nil {
@@ -100,6 +102,9 @@ func (h *harness) do(method, path string, body any, token string) (int, map[stri
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
 	}
 	resp, err := h.srv.Client().Do(req)
 	if err != nil {
@@ -154,12 +159,17 @@ func (h *harness) createSession(players ...string) string {
 	if !ok {
 		h.t.Fatal("session create: no id in response")
 	}
+	token, _ := body["runtime_token"].(string)
+	if token == "" {
+		h.t.Fatal("session create: no runtime_token in response")
+	}
+	h.token = token
 	return id
 }
 
 func (h *harness) ready(id string) {
 	h.t.Helper()
-	status, _ := h.do(http.MethodPost, "/v1/session/sessions/"+id+"/ready", map[string]any{}, h.auth)
+	status, _ := h.do(http.MethodPost, "/v1/session/sessions/"+id+"/ready", map[string]any{}, h.auth, "X-Session-Token", h.token)
 	h.expect(status, http.StatusOK, "session ready")
 }
 
@@ -210,9 +220,18 @@ func TestAllocationFailureFailsTheSession(t *testing.T) {
 		t.Fatalf("session state = %q, want failed", state)
 	}
 
-	// And it cannot be resurrected by a late ready call.
+	// And it cannot be resurrected by a late ready call. The caller has no session
+	// token (the allocation never produced an instance, so nobody was given one), so
+	// the refusal is 401 - the credential check runs before the state machine, which
+	// keeps unauthenticated callers from learning anything about the session's state.
 	status, _ = h.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/ready", map[string]any{}, h.auth)
-	h.expect(status, http.StatusPreconditionFailed, "ready after failure")
+	h.expect(status, http.StatusUnauthorized, "ready after failure without the session token")
+
+	// A session whose allocation failed still refuses a *valid* token on state
+	// grounds; that is the transition check, reached only with the credential.
+	memoryToken := memory.byID[sessionID].RuntimeToken
+	status, _ = h.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/ready", map[string]any{}, h.auth, "X-Session-Token", memoryToken)
+	h.expect(status, http.StatusPreconditionFailed, "ready after failure with the session token")
 }
 
 // TestFanOutFailureKeepsTheSessionOpen pins the other half of spec section 6:
@@ -226,7 +245,7 @@ func TestFanOutFailureKeepsTheSessionOpen(t *testing.T) {
 	h.ready(id)
 
 	report := h.report(id)
-	status, _ := h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", report, h.auth)
+	status, _ := h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", report, h.auth, "X-Session-Token", h.token)
 	h.expect(status, http.StatusServiceUnavailable, "report while the fan-out is down")
 
 	status, body := h.do(http.MethodGet, "/v1/session/sessions/"+id, nil, "dev-player-p_1")
@@ -246,7 +265,7 @@ func TestFanOutFailureKeepsTheSessionOpen(t *testing.T) {
 
 	// The bus recovers; the retry must converge without paying twice.
 	sink.fail = false
-	status, body = h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", report, h.auth)
+	status, body = h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", report, h.auth, "X-Session-Token", h.token)
 	h.expect(status, http.StatusOK, "retry after the fan-out recovers")
 	if applied, _ := nested(t, body, "applied").(bool); !applied {
 		t.Fatal("retried report should apply")
@@ -281,7 +300,7 @@ func TestResultMustCoverTheSessionExactly(t *testing.T) {
 		},
 	}
 	for name, body := range cases {
-		status, resp := h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", body, h.auth)
+		status, resp := h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", body, h.auth, "X-Session-Token", h.token)
 		if status != http.StatusBadRequest {
 			t.Fatalf("%s: status = %d, want 400", name, status)
 		}
@@ -346,7 +365,7 @@ func TestSubmitResultReleasesTheServer(t *testing.T) {
 	id := h.createSession("p_1", "p_2")
 	h.ready(id)
 
-	status, _ := h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", h.report(id), h.auth)
+	status, _ := h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", h.report(id), h.auth, "X-Session-Token", h.token)
 	h.expect(status, http.StatusOK, "battle report")
 
 	if len(alloc.released) != 1 {
@@ -357,7 +376,7 @@ func TestSubmitResultReleasesTheServer(t *testing.T) {
 	}
 
 	// A replay must not release twice: the server is already gone.
-	status, _ = h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", h.report(id), h.auth)
+	status, _ = h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", h.report(id), h.auth, "X-Session-Token", h.token)
 	h.expect(status, http.StatusOK, "replay")
 	if len(alloc.released) != 1 {
 		t.Fatalf("releases after replay = %v, want still one", alloc.released)
@@ -415,7 +434,7 @@ func TestExpireStaleLeavesFinishedSessionsAlone(t *testing.T) {
 	h := newHarness(t, alloc, &fakeSink{})
 	id := h.createSession("p_1", "p_2")
 	h.ready(id)
-	status, _ := h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", h.report(id), h.auth)
+	status, _ := h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", h.report(id), h.auth, "X-Session-Token", h.token)
 	h.expect(status, http.StatusOK, "battle report")
 
 	expired, err := h.app.ExpireStale(context.Background(), time.Now().Add(24*time.Hour), time.Minute)

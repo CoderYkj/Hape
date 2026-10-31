@@ -9,6 +9,17 @@
 |---|---|---|---|
 | 1 | `Listen` 成功之后 | 上报地址端口 | `POST /v1/session/sessions/{id}/ready` |
 | 2 | 对局正常结束 | 上报权威战报 | `POST /v1/session/sessions/{id}/results` |
+
+两个上报都要带**双凭证**：
+
+```text
+Authorization: Bearer <BACKEND_SERVICE_TOKEN>    # 进程身份
+X-Session-Token: <RUNTIME_TOKEN>                 # 这一场的身份
+```
+
+`RUNTIME_TOKEN` 由后端分配时生成，通过托管厂商的实例环境变量注入（Edgegap 走
+`env_vars`，`is_hidden: true`）。DS 把它读进内存、每个上报请求都带上即可，不要写日志。
+缺它或者拿别场的 token → `401 unauthenticated`（见 spec 0008）。
 | 3 | 每局开始 | 生成并**持久化** `result_id` | （无，本地落盘） |
 
 第 3 条最容易被忽略：`result_id` 必须是"这一局的结果标识"，DS 崩溃重启后仍能拿回同一个值，
@@ -139,6 +150,7 @@ go run ./tools/fakeds     # 终端 2：模拟一台 DS 跑完整一局
 |---|---|
 | DS 上报 401 | `BACKEND_SERVICE_TOKEN` 与后端 `BACKEND_SERVICE_TOKEN` 是否一致 |
 | DS 上报 404 | `BACKEND_BASE_URL` 路径前缀是否多/少了 `/v1` |
+| DS 上报 401 | 是不是漏了 `X-Session-Token`，或拿成了别场的 token；会话没有 token 说明是旧数据 |
 | DS 上报 412 | `GET session` 看状态是不是还在 `allocating`（ready 没成功） |
 | 玩家结算了但没到账 | 后端日志按 `result_id` grep，看扇出三条是否都成功 |
 | 同一局结算两次 | DS 的 `result_id` 是否每次现生成（这是 bug） |

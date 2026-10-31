@@ -24,7 +24,7 @@ type client struct {
 	token string
 }
 
-func (c client) do(method, path string, body any) (map[string]any, error) {
+func (c client) do(method, path string, body any, headers ...string) (map[string]any, error) {
 	var reader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -40,6 +40,9 @@ func (c client) do(method, path string, body any) (map[string]any, error) {
 	req.Header.Set("Content-Type", "application/json")
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -121,13 +124,17 @@ func run(base, queue string) error {
 		return err
 	}
 	sessionID := pickPath(body, "session.id")
+	dsToken := pickPath(body, "runtime_token")
+	if dsToken == "" {
+		return fmt.Errorf("session.create did not return a runtime token")
+	}
 	fmt.Printf("  session: %s state=%s provider=%s address=%s:%v\n", sessionID,
 		pickPath(body, "session.state"), pickPath(body, "session.provider"),
 		pickPath(body, "session.address"), body["session"].(map[string]any)["port"])
 
 	step("report ready")
 	if _, err := service.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/ready",
-		map[string]any{"address": "127.0.0.1", "port": 7777}); err != nil {
+		map[string]any{"address": "127.0.0.1", "port": 7777}, "X-Session-Token", dsToken); err != nil {
 		return err
 	}
 
@@ -144,12 +151,12 @@ func run(base, queue string) error {
 			{"player_id": players[1], "won": false, "score": 420, "kills": 3, "deaths": 7, "damage": 800},
 		},
 	}
-	if _, err := service.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/results", report); err != nil {
+	if _, err := service.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/results", report, "X-Session-Token", dsToken); err != nil {
 		return err
 	}
 
 	step("replay the same report (must not pay twice)")
-	replay, err := service.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/results", report)
+	replay, err := service.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/results", report, "X-Session-Token", dsToken)
 	if err != nil {
 		return err
 	}

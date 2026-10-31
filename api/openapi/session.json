@@ -159,7 +159,8 @@
             }
           }
         },
-        "x-idempotent": true
+        "x-idempotent": true,
+        "x-note": "Requires the service token AND the session's X-Session-Token header: the first proves a trusted process, the second proves this is the DS of that match."
       }
     },
     "/v1/session/sessions/{session_id}/results": {
@@ -217,7 +218,7 @@
           }
         },
         "x-idempotent": true,
-        "x-note": "Idempotent by result_id. Downstream fan-out runs before the session is marked finished, so a retry re-runs idempotent sinks."
+        "x-note": "Idempotent by result_id; requires the service token AND the session's X-Session-Token. Downstream fan-out runs inside one transaction, so a retry re-runs idempotent sinks."
       }
     }
   },
@@ -258,11 +259,16 @@
       },
       "CreateSessionResponse": {
         "properties": {
+          "runtime_token": {
+            "description": "Per-session DS credential; also injected into the instance.",
+            "type": "string"
+          },
           "session": {
             "$ref": "#/components/schemas/Session"
           }
         },
         "required": [
+          "runtime_token",
           "session"
         ],
         "type": "object"
@@ -450,6 +456,10 @@
           },
           "result_id": {
             "description": "Idempotency id of the accepted battle report.",
+            "type": "string"
+          },
+          "runtime_token": {
+            "description": "Present only in the session.create response.",
             "type": "string"
           },
           "state": {

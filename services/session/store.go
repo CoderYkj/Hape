@@ -21,18 +21,23 @@ const (
 
 // Session is one authoritative match instance and its lifecycle.
 type Session struct {
-	ID           string     `json:"id" doc:"Session id."`
-	MatchID      string     `json:"match_id" doc:"Match id produced by matchmaking."`
-	State        string     `json:"state" doc:"allocating, ready, in_progress, finished or failed."`
-	Players      []string   `json:"players" doc:"Player ids expected in this match."`
-	Queue        string     `json:"queue" doc:"Queue the match came from."`
-	Region       string     `json:"region" doc:"Requested region."`
-	Map          string     `json:"map" doc:"Map identifier passed to the dedicated server."`
-	AllocationID string     `json:"allocation_id" doc:"Provider allocation id, used to release the server."`
-	Provider     string     `json:"provider" doc:"local, gamelift, edgegap or agones."`
-	Address      string     `json:"address" doc:"Dedicated server address reported by the provider."`
-	Port         int        `json:"port" doc:"Dedicated server port."`
-	ResultID     string     `json:"result_id,omitempty" doc:"Idempotency id of the accepted battle report."`
+	ID           string   `json:"id" doc:"Session id."`
+	MatchID      string   `json:"match_id" doc:"Match id produced by matchmaking."`
+	State        string   `json:"state" doc:"allocating, ready, in_progress, finished or failed."`
+	Players      []string `json:"players" doc:"Player ids expected in this match."`
+	Queue        string   `json:"queue" doc:"Queue the match came from."`
+	Region       string   `json:"region" doc:"Requested region."`
+	Map          string   `json:"map" doc:"Map identifier passed to the dedicated server."`
+	AllocationID string   `json:"allocation_id" doc:"Provider allocation id, used to release the server."`
+	Provider     string   `json:"provider" doc:"local, gamelift, edgegap or agones."`
+	Address      string   `json:"address" doc:"Dedicated server address reported by the provider."`
+	Port         int      `json:"port" doc:"Dedicated server port."`
+	ResultID     string   `json:"result_id,omitempty" doc:"Idempotency id of the accepted battle report."`
+	// RuntimeToken is the per-session credential the dedicated server must present
+	// on mark_ready/submit_result. It is stripped from every read path: only the
+	// create response (service-only op) carries it, because a player reading the
+	// session must never receive the report credential.
+	RuntimeToken string     `json:"runtime_token,omitempty" doc:"Present only in the session.create response."`
 	CreatedAt    time.Time  `json:"created_at" doc:"RFC3339 creation time."`
 	ReadyAt      *time.Time `json:"ready_at,omitempty" doc:"When the dedicated server reported ready."`
 	FinishedAt   *time.Time `json:"finished_at,omitempty" doc:"When the accepted battle report landed."`

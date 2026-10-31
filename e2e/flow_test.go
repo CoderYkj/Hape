@@ -234,6 +234,11 @@ func TestMatchLifecycle(t *testing.T) {
 	})
 	expect(t, status, http.StatusOK, "session create")
 	sessionID := atString(t, body, "session.id")
+	// Dual credentials: the DS authenticates as a service AND as this session.
+	dsToken := atString(t, body, "runtime_token")
+	if dsToken == "" {
+		t.Fatal("session.create must return the per-session runtime token")
+	}
 	if state := atString(t, body, "session.state"); state != "allocating" {
 		t.Fatalf("session state = %q, want allocating", state)
 	}
@@ -244,7 +249,7 @@ func TestMatchLifecycle(t *testing.T) {
 	status, body = service.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/ready", map[string]any{
 		"address": "10.0.0.7",
 		"port":    7777,
-	})
+	}, "X-Session-Token", dsToken)
 	expect(t, status, http.StatusOK, "session ready")
 	if state := atString(t, body, "session.state"); state != "ready" {
 		t.Fatalf("session state = %q, want ready", state)
@@ -265,22 +270,30 @@ func TestMatchLifecycle(t *testing.T) {
 			{"player_id": p2, "won": false, "score": 400, "kills": 2, "deaths": 9, "damage": 700},
 		},
 	}
-	status, body = service.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/results", resultBody)
+	status, body = service.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/results", resultBody,
+		"X-Session-Token", dsToken)
 	expect(t, status, http.StatusOK, "battle report")
 	if !atBool(t, body, "applied") {
 		t.Fatal("first battle report must apply")
 	}
 
 	// --- replay is idempotent: no double payout ---------------------------
-	status, body = service.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/results", resultBody)
+	status, body = service.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/results", resultBody,
+		"X-Session-Token", dsToken)
 	expect(t, status, http.StatusOK, "battle report replay")
 	if atBool(t, body, "applied") {
 		t.Fatal("replayed battle report must not apply again")
 	}
 
+	// Without the session token the report is refused even with a valid service
+	// token: the shared token proves "a trusted process", not "this match's DS".
+	status, _ = service.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/results", resultBody)
+	expect(t, status, http.StatusUnauthorized, "report without the session token")
+
 	// A different result for the same session is a conflict, not an overwrite.
 	other := map[string]any{"result_id": "result-2", "players": resultBody["players"]}
-	status, _ = service.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/results", other)
+	status, _ = service.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/results", other,
+		"X-Session-Token", dsToken)
 	expect(t, status, http.StatusConflict, "second distinct result")
 
 	// --- fan-out: economy, progress and rank all saw the match once --------

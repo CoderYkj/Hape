@@ -47,12 +47,13 @@ func TestStoresAgree(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			created, err := tc.store.Create(ctx, session.Session{
-				ID:        "s_" + tc.name + "_" + suffix,
-				MatchID:   matchID,
-				State:     session.StateAllocating,
-				Players:   []string{"p_1", "p_2"},
-				Queue:     "ranked_1v1",
-				CreatedAt: time.Now().UTC(),
+				ID:           "s_" + tc.name + "_" + suffix,
+				MatchID:      matchID,
+				State:        session.StateAllocating,
+				Players:      []string{"p_1", "p_2"},
+				Queue:        "ranked_1v1",
+				RuntimeToken: "tok_" + suffix,
+				CreatedAt:    time.Now().UTC(),
 			})
 			if err != nil {
 				t.Fatalf("create: %v", err)
@@ -95,6 +96,11 @@ func TestStoresAgree(t *testing.T) {
 			})
 			if err != nil {
 				t.Fatalf("ready: %v", err)
+			}
+			// The per-session credential must survive the round trip: a store that drops
+			// it would lock the DS out of its own session.
+			if readied.RuntimeToken != "tok_"+suffix {
+				t.Fatalf("runtime token lost on update: %q", readied.RuntimeToken)
 			}
 			if readied.State != session.StateReady || readied.AllocationID != "alloc-1" || readied.Port != 7777 {
 				t.Fatalf("unexpected ready session: %+v", readied)

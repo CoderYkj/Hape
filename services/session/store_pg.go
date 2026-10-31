@@ -41,13 +41,13 @@ func (s *PG) Create(ctx context.Context, session Session) (Session, error) {
 	err := pg.InTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO sessions (id, match_id, state, queue, region, map,
-			                       allocation_id, provider, address, port, result_id,
+			                       allocation_id, provider, address, port, result_id, runtime_token,
 			                       created_at, ready_at, finished_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 			session.ID, session.MatchID, session.State, session.Queue, session.Region, session.Map,
 			nullify(session.AllocationID), nullify(session.Provider), nullify(session.Address),
-			nullifyPort(session.Port), nullify(session.ResultID), session.CreatedAt,
-			session.ReadyAt, session.FinishedAt); err != nil {
+			nullifyPort(session.Port), nullify(session.ResultID), nullify(session.RuntimeToken),
+			session.CreatedAt, session.ReadyAt, session.FinishedAt); err != nil {
 			if pg.IsUniqueViolation(err) {
 				if pg.ConstraintName(err) == "sessions_one_per_match" {
 					return apierr.Conflict("a session already exists for this match").
@@ -99,11 +99,11 @@ func (s *PG) Update(ctx context.Context, id string, mutate func(*Session) error)
 		if _, err := tx.Exec(ctx,
 			`UPDATE sessions SET
 			     state = $2, allocation_id = $3, provider = $4, address = $5, port = $6,
-			     result_id = $7, ready_at = $8, finished_at = $9
+			     result_id = $7, ready_at = $8, finished_at = $9, runtime_token = $10
 			   WHERE id = $1`,
 			current.ID, current.State, nullify(current.AllocationID), nullify(current.Provider),
 			nullify(current.Address), nullifyPort(current.Port), nullify(current.ResultID),
-			current.ReadyAt, current.FinishedAt); err != nil {
+			current.ReadyAt, current.FinishedAt, nullify(current.RuntimeToken)); err != nil {
 			if pg.IsCheckViolation(err) {
 				// e.g. finished without a result id: the schema refuses a state the
 				// Go state machine should never have produced.
@@ -136,7 +136,7 @@ func (s *PG) ExpireStale(ctx context.Context, before time.Time) ([]Session, erro
 		  WHERE state IN ($3, $4) AND created_at < $1
 		  RETURNING id, match_id, state, queue, region, map, coalesce(allocation_id, ''),
 		            coalesce(provider, ''), coalesce(address, ''), coalesce(port, 0),
-		            coalesce(result_id, ''), created_at, ready_at, finished_at`,
+		            coalesce(result_id, ''), coalesce(runtime_token, ''), created_at, ready_at, finished_at`,
 		before, StateFailed, StateAllocating, StateReady)
 	if err != nil {
 		return nil, err
@@ -161,7 +161,7 @@ func (s *PG) ExpireStale(ctx context.Context, before time.Time) ([]Session, erro
 func (s *PG) get(ctx context.Context, db pg.DB, id string, forUpdate bool) (Session, error) {
 	query := `SELECT id, match_id, state, queue, region, map,
 	                 coalesce(allocation_id, ''), coalesce(provider, ''), coalesce(address, ''),
-	                 coalesce(port, 0), coalesce(result_id, ''), created_at, ready_at, finished_at
+	                 coalesce(port, 0), coalesce(result_id, ''), coalesce(runtime_token, ''), created_at, ready_at, finished_at
 	            FROM sessions WHERE id = $1`
 	if forUpdate {
 		query += ` FOR UPDATE`
@@ -174,7 +174,7 @@ func (s *PG) get(ctx context.Context, db pg.DB, id string, forUpdate bool) (Sess
 	err := db.QueryRow(ctx, query, id).Scan(
 		&session.ID, &session.MatchID, &session.State, &session.Queue, &session.Region, &session.Map,
 		&session.AllocationID, &session.Provider, &session.Address, &session.Port, &session.ResultID,
-		&createdAt, &session.ReadyAt, &session.FinishedAt)
+		&session.RuntimeToken, &createdAt, &session.ReadyAt, &session.FinishedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, apierr.NotFound("session not found").WithDetail("session_id", id)
 	}
@@ -213,7 +213,7 @@ func scanSession(row scanner) (Session, error) {
 	if err := row.Scan(
 		&session.ID, &session.MatchID, &session.State, &session.Queue, &session.Region, &session.Map,
 		&session.AllocationID, &session.Provider, &session.Address, &session.Port, &session.ResultID,
-		&createdAt, &session.ReadyAt, &session.FinishedAt); err != nil {
+		&session.RuntimeToken, &createdAt, &session.ReadyAt, &session.FinishedAt); err != nil {
 		return Session{}, err
 	}
 	session.CreatedAt = createdAt.UTC()
