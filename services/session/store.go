@@ -59,6 +59,19 @@ type Store interface {
 	Update(id string, mutate func(*Session) error) (Session, error)
 }
 
+// RecordResult implements ResultRecorder. The memory store keeps the report in a
+// map: process-local, forgotten on restart, which is exactly why the SQL store
+// exists.
+func (m *Memory) RecordResult(match FinishedMatch) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, exists := m.results[match.ResultID]; exists {
+		return nil
+	}
+	m.results[match.ResultID] = match
+	return nil
+}
+
 // Expirer is the optional capability the reconciler needs: find sessions that
 // have been sitting in a pre-match state for too long and mark them failed.
 //
@@ -66,17 +79,23 @@ type Store interface {
 // remote index behind its own API) simply does not implement it, and the caller
 // can report "this deployment cannot sweep" instead of pretending it ran.
 type Expirer interface {
-	ExpireStale(before time.Time) []Session
+	// ExpireStale returns the sessions it failed, or an error. The error matters:
+	// a sweep that silently returns nothing looks identical to "nothing to do".
+	ExpireStale(before time.Time) ([]Session, error)
 }
 
 // Memory is the in-memory Store.
 type Memory struct {
-	mu   sync.Mutex
-	byID map[string]Session
+	mu      sync.Mutex
+	byID    map[string]Session
+	byMatch map[string]string
+	results map[string]FinishedMatch
 }
 
 // NewMemory builds an empty session store.
-func NewMemory() *Memory { return &Memory{byID: map[string]Session{}} }
+func NewMemory() *Memory {
+	return &Memory{byID: map[string]Session{}, byMatch: map[string]string{}, results: map[string]FinishedMatch{}}
+}
 
 func (m *Memory) Create(session Session) (Session, error) {
 	m.mu.Lock()
@@ -84,7 +103,14 @@ func (m *Memory) Create(session Session) (Session, error) {
 	if _, exists := m.byID[session.ID]; exists {
 		return Session{}, apierr.Conflict("session already exists").WithDetail("session_id", session.ID)
 	}
+	// Mirrors sessions_one_per_match: one session per match, so a retried create
+	// cannot allocate a second dedicated server.
+	if existingID, ok := m.byMatch[session.MatchID]; ok && existingID != session.ID {
+		return Session{}, apierr.Conflict("a session already exists for this match").
+			WithDetail("match_id", session.MatchID)
+	}
 	m.byID[session.ID] = session
+	m.byMatch[session.MatchID] = session.ID
 	return session, nil
 }
 
@@ -116,7 +142,7 @@ func (m *Memory) Update(id string, mutate func(*Session) error) (Session, error)
 // `before`, and returns them. in_progress is excluded on purpose: a legitimate
 // long match and an abandoned one are indistinguishable without a per-game
 // timeout, and killing a live match is worse than paying for a leaked one.
-func (m *Memory) ExpireStale(before time.Time) []Session {
+func (m *Memory) ExpireStale(before time.Time) ([]Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -138,7 +164,7 @@ func (m *Memory) ExpireStale(before time.Time) []Session {
 	// Deterministic order: map iteration is random, and a reconciler log that
 	// reorders itself on every tick is useless for diffing.
 	sort.Slice(expired, func(i, j int) bool { return expired[i].ID < expired[j].ID })
-	return expired
+	return expired, nil
 }
 
 // CanTransition reports whether from -> to is allowed.

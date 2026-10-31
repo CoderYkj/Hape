@@ -72,7 +72,7 @@ scripts\pg-local.cmd -Action start|stop|status|migrate|probe|grant
 
 # 跑「内存实现 vs SQL 实现」等价性测试（无此变量则 skip）
 $env:BACKEND_TEST_DATABASE_URL = 'postgres://gamebackend:gamebackend@127.0.0.1:55432/gamebackend?sslmode=disable'
-go test -count=1 ./services/account/ ./services/economy/
+go test -count=1 ./services/...         # 七个域的等价性测试（无变量时 skip）
 
 # 整个平台连真库跑一遍
 $env:BACKEND_DATABASE_URL = $env:BACKEND_TEST_DATABASE_URL

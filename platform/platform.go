@@ -110,18 +110,21 @@ func New(cfg Config) (*Platform, error) {
 		reconcileInterval: cfg.ReconcileInterval,
 		sessionStaleAfter: staleAfter,
 	}
-	p.Team = team.New(log.With("domain", "team"))
 	// Stores are chosen per domain, and the choice is logged so nobody has to
 	// guess which half of the backend survives a restart.
 	//
-	// Migrated so far (M1, spec 0002): account, economy, progress, rank. They move
-	// together because money and XP carry foreign keys to players and the match
-	// sink writes all three in one fan-out.
+	// Every domain has a Store seam, and DatabaseURL switches all seven at once
+	// (M1, spec 0002). Half-migrated state is possible in principle, but a
+	// backend that says which store each domain runs on is easier to trust than
+	// one that silently mixes.
 	var (
-		accountStore  account.Store
-		economyStore  economy.Store
-		progressStore progress.Store
-		rankStore     rank.Store
+		accountStore     account.Store
+		teamStore        team.Store
+		matchmakingStore matchmaking.Store
+		sessionStore     session.Store
+		progressStore    progress.Store
+		economyStore     economy.Store
+		rankStore        rank.Store
 	)
 	if cfg.DatabaseURL != "" {
 		pool, err := pg.Open(context.Background(), cfg.DatabaseURL)
@@ -130,27 +133,35 @@ func New(cfg Config) (*Platform, error) {
 		}
 		p.pool = pool
 		accountStore = account.NewPG(pool)
-		economyStore = economy.NewPG(pool)
+		teamStore = team.NewPG(pool)
+		matchmakingStore = matchmaking.NewPG(pool)
+		sessionStore = session.NewPG(pool)
 		progressStore = progress.NewPG(pool)
+		economyStore = economy.NewPG(pool)
 		rankStore = rank.NewPG(pool)
-		for _, domain := range []string{"account", "economy", "progress", "rank"} {
-			log.Info("store selected", "domain", domain, "store", "postgres")
-		}
 	} else {
 		accountStore = account.NewMemory()
-		economyStore = economy.NewMemory()
+		teamStore = team.NewMemory()
+		matchmakingStore = matchmaking.NewMemory()
+		sessionStore = session.NewMemory()
 		progressStore = progress.NewMemory()
+		economyStore = economy.NewMemory()
 		rankStore = rank.NewMemory()
-		for _, domain := range []string{"account", "economy", "progress", "rank"} {
-			log.Info("store selected", "domain", domain, "store", "memory")
-		}
+	}
+	store := "memory"
+	if cfg.DatabaseURL != "" {
+		store = "postgres"
+	}
+	for _, domain := range []string{"account", "team", "matchmaking", "session", "progress", "economy", "rank"} {
+		log.Info("store selected", "domain", domain, "store", store)
 	}
 	p.Account = account.NewWithStore(log.With("domain", "account"), accountStore)
+	p.Team = team.NewWithStore(log.With("domain", "team"), teamStore)
 	p.Economy = economy.NewWithStore(log.With("domain", "economy"), economyStore)
 	p.Progress = progress.NewWithStore(log.With("domain", "progress"), progressStore)
 	p.Rank = rank.NewWithStore(log.With("domain", "rank"), rankStore)
-	p.Matchmaking = matchmaking.New(log.With("domain", "matchmaking"), p.Rank.Rating)
-	p.Session = session.New(log.With("domain", "session"), alloc, &matchSink{
+	p.Matchmaking = matchmaking.NewWithStore(log.With("domain", "matchmaking"), matchmakingStore, p.Rank.Rating)
+	p.Session = session.NewWithStore(log.With("domain", "session"), sessionStore, alloc, &matchSink{
 		log:      log.With("domain", "match_sink"),
 		progress: p.Progress,
 		economy:  p.Economy,

@@ -1,6 +1,6 @@
 # 0002 - M1 持久化：账号与经济先落 Postgres
 
-- 状态：in progress（4/7 域已落库：account、economy、progress、rank）
+- 状态：implemented（7/7 域已落库；含战报留档）
 - 日期：2026-01-01
 - 关联 ADR：0006（驱动与策略）、0005（模块化单体）
 - 涉及服务：account、economy（本批）；其余五个域仍内存
@@ -18,7 +18,18 @@ Go 侧的实现与装配。
 `rating_events` 天然带幂等主键；progress 需要一个新表（`0002_progress_grants.sql`）
 承载幂等键，因为 `player_progress` 只有累计值。
 
-余下三个域（team / matchmaking / session）按同样模板跟进。
+第三批：team + matchmaking + session。它们暴露了三个此前只在内存里活着的规则，
+落库时才发现必须显式化：
+
+- 一人一队（`team_members_one_team_per_player`）：内存版原先允许一个人建两个队，
+  现在两端都拒绝。
+- 同队列一张 waiting 票（`matchmaking_one_waiting_ticket`）：内存版原先只靠服务层
+  先查后写，现在是数据库兜底。
+- 一个 match 一场会话（`sessions_one_per_match`）：内存版原先只按 session id 去重。
+
+同时补上了一条审计缺口：`match_results` / `match_player_results` 之前**没有任何代码
+写入**，战报只用于发奖、没有留档。现在 `session.submitResult` 在发奖前先落库存档
+（按 `result_id` 幂等），失败返回 503 可重试。
 
 ## 2. 目标 / 非目标
 
@@ -69,6 +80,9 @@ Then  每一步的 applied 标志、余额、错误码、账本内容完全一�
 | economy | `wallets`、`ledger_entries` |
 | progress | `player_progress`、`progress_grants`（迁移 0002 新增） |
 | rank | `player_ratings`、`rating_events` |
+| team | `teams`、`team_members` |
+| matchmaking | `matchmaking_tickets` |
+| session | `sessions`、`session_players`、`match_results`、`match_player_results` |
 
 ## 6. 不变量与失败模式
 
@@ -94,6 +108,9 @@ Then  每一步的 applied 标志、余额、错误码、账本内容完全一�
 | 等价性 | economy：首次入账 / 幂等重放 / 扣费 / 余额不足 / 未知货币 / 金额 0 / 非正数 |
 | 等价性 | progress：首次读取 / 入账 / 幂等重放 / 跨级（140+900=1040 → 2 级）/ 空键 / 0 XP |
 | 等价性 | rank：首评 1000 / 胜 +24 / 幂等重放不位移 / 负 -16 / 空键 / 62 连败夹到下限 100 / 榜单顺序 |
+| 等价性 | team：建队 / 入队 / 重放不重复 / 一人一队被拒 / 未知队 404 / owner 排首位 |
+| 等价性 | matchmaking：入队 / 重复票被拒 / 单人不成局 / 两人成局并标记 matched / 空队列 / 未知票 404 |
+| 等价性 | session：一场一会话 / 非法跳转被拒 / ready→finished / 落库回读 / 战报留档且重放不重复 / 超时扫成 failed |
 | 数据库约束 | `db/probes/0001_constraints.probe.sql`（35 条，psql 直接跑） |
 | 端到端 | `platform` + `fakeds`，`BACKEND_DATABASE_URL` 指向真库，检查落库行 |
 | 内存路径 | 全部既有测试（`go test ./...`）在无 `BACKEND_DATABASE_URL` 时仍必须全绿 |

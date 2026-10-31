@@ -305,6 +305,24 @@ func (s *Service) submitResult(r *http.Request) (any, error) {
 		return nil, ErrInvalidTransition.WithDetail("from", current.State).WithDetail("to", StateFinished)
 	}
 
+	// Record the report before the fan-out: if the rewards fail and the caller
+	// retries, the retry must find the same report on file. Recording is
+	// idempotent by result_id, so a duplicate is a no-op.
+	if recorder, ok := s.store.(ResultRecorder); ok {
+		if err := recorder.RecordResult(FinishedMatch{
+			SessionID:       sessionID,
+			MatchID:         current.MatchID,
+			ResultID:        req.ResultID,
+			Players:         req.Players,
+			DurationSeconds: req.DurationSeconds,
+			FinishedAt:      s.now().UTC(),
+		}); err != nil {
+			s.log.ErrorContext(r.Context(), "recording the battle report failed",
+				"session_id", sessionID, "result_id", req.ResultID, "err", err)
+			return nil, apierr.Unavailable("recording the battle report failed, retry with the same result_id").WithCause(err)
+		}
+	}
+
 	if s.sink != nil {
 		err := s.sink.MatchFinished(r.Context(), FinishedMatch{
 			SessionID:       sessionID,
@@ -349,6 +367,16 @@ func (s *Service) submitResult(r *http.Request) (any, error) {
 	return SubmitResultResponse{Session: updated, Applied: true}, nil
 }
 
+// ResultRecorder is an optional store capability: keep the authoritative report
+// itself, not merely the rewards it triggered.
+//
+// The rewards are auditable on their own (ledger + idempotency keys), but "why did
+// this player get 100 gold" is answered by the report. Without it, the ledger says
+// a match happened and nothing says what the match was.
+type ResultRecorder interface {
+	RecordResult(match FinishedMatch) error
+}
+
 // StaleSession is one session the reconciler declared dead.
 type StaleSession struct {
 	ID           string
@@ -375,7 +403,10 @@ func (s *Service) ExpireStale(ctx context.Context, now time.Time, staleAfter tim
 		return nil, ErrNoExpirer
 	}
 
-	expired := expirer.ExpireStale(now.Add(-staleAfter))
+	expired, err := expirer.ExpireStale(now.Add(-staleAfter))
+	if err != nil {
+		return nil, err
+	}
 	out := make([]StaleSession, 0, len(expired))
 	for _, stale := range expired {
 		if err := s.alloc.Release(ctx, stale.AllocationID); err != nil {

@@ -74,8 +74,8 @@ scripts\pg-local.cmd -Action probe     # 跑 db/probes/*.probe.sql
 
 ## 未验证 / 未做
 
-- **4/7 域已接线**：account、economy、progress、rank 走 Postgres；team、
-  matchmaking、session 仍是内存实现（`services/*/store.go` 的 `Memory`）。
+- **7/7 域已接线**：`BACKEND_DATABASE_URL` 一设，七个域全部走 Postgres；
+  不设则全部走内存（`go run` 与 `go test ./...` 零数据库依赖）。
 - 等价性测试（`services/*/store_equiv_test.go`）在本机真库上跑过，但**不在 CI 里**。
 - 没有 CI：CI 里没有 Postgres 服务，`probe` 目前只能手工跑。要进 CI 得给
   workflow 加 `services: postgres`，那一步没验证过。

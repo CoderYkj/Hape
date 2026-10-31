@@ -46,9 +46,17 @@ handler、契约层、`platform` 的服务装配都不 import 驱动类型。
 4. **迁移按域推进**，不搞一次性大爆炸：每个域一个 `store_pg.go` + 一组等价性测试。
    装配日志明确打印每个域用的是 `memory` 还是 `postgres`。
 
-已迁域：`account`、`economy`、`progress`、`rank`（4/7）。未迁：`team`、
-`matchmaking`、`session`。迁移文件目前两个：`0001_init.sql`（全量 schema）、
+已迁域：**7/7**——`account`、`team`、`matchmaking`、`session`、`progress`、
+`economy`、`rank`。迁移文件两个：`0001_init.sql`（全量 schema）、
 `0002_progress_grants.sql`（经验幂等承载表，因为 `player_progress` 只有累计值）。
+
+落库过程中发现三条"只在内存里活着"的规则，现在由数据库兜底、由内存实现对齐：
+一人一队、同队列一张 waiting 票、一个 match 一场会话。还补了一个审计缺口：
+`match_results` / `match_player_results` 之前没有写入方，战报只用于发钱不留档，
+现在 `session.submitResult` 先存档再发奖（`result_id` 幂等）。
+
+两个可选能力接口也在这里出现：`session.Expirer`（超时清理）与
+`session.ResultRecorder`（战报留档）。SQL 与内存都实现，接口不变。
 
 ## 已知债务（写下来，别假装不存在）
 
@@ -56,6 +64,9 @@ handler、契约层、`platform` 的服务装配都不 import 驱动类型。
    请求取消无法向下传播。要修就得改所有 Store 接口与调用点，属于 M2。
 2. **跨域结算不是单个事务**。`platform/sink.go` 依次写进度、经济、排行，各自幂等，
    但不是一个事务；中途失败靠"同一 `result_id` 重试"收敛，而不是原子性。
+3. **两个无 error 返回的查询会静默降级**：`rank.RatingOf` 出错退化为默认分，
+   `matchmaking.FindWaitingByPlayer` 出错当作"没在排队"。数据库那边的唯一索引是
+   真正的兜底，但调用方拿不到错误。
 3. **账号与经济必须先一起迁**。`ledger_entries.player_id` 有外键指向 `players`，
    只迁经济不迁账号 → 发钱直接失败。这是刻意的数据完整性，不是耦合失误。
 

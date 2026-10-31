@@ -51,6 +51,13 @@ func (m *Memory) Create(ownerID, name string) (Team, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Same rule as the database's team_members_one_team_per_player index: a player
+	// belongs to one team at a time. Kept identical in both stores so the
+	// equivalence test is meaningful.
+	if teamID, ok := m.teamOfLocked(ownerID); ok {
+		return Team{}, apierr.Precondition("player is already in a team").WithDetail("team_id", teamID)
+	}
+
 	m.serial++
 	now := m.now().UTC()
 	team := Team{
@@ -88,6 +95,9 @@ func (m *Memory) Join(teamID, playerID string) (Team, bool, error) {
 			return team, false, nil
 		}
 	}
+	if otherID, ok := m.teamOfLocked(playerID); ok && otherID != teamID {
+		return Team{}, false, apierr.Precondition("player is already in another team").WithDetail("team_id", otherID)
+	}
 	if len(team.Members) >= MaxTeamSize {
 		return Team{}, false, apierr.Precondition("team is full").WithDetail("max_team_size", strconv.Itoa(MaxTeamSize))
 	}
@@ -95,6 +105,19 @@ func (m *Memory) Join(teamID, playerID string) (Team, bool, error) {
 	team.UpdatedAt = m.now().UTC()
 	m.byID[teamID] = team
 	return team, true, nil
+}
+
+// teamOfLocked returns the team a player currently belongs to, if any. Callers
+// hold the mutex.
+func (m *Memory) teamOfLocked(playerID string) (string, bool) {
+	for teamID, team := range m.byID {
+		for _, member := range team.Members {
+			if member.PlayerID == playerID {
+				return teamID, true
+			}
+		}
+	}
+	return "", false
 }
 
 // ValidateName enforces the team naming rule.

@@ -59,6 +59,16 @@ func (m *Memory) Create(ticket Ticket) (Ticket, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Mirrors the partial unique index matchmaking_one_waiting_ticket: one waiting
+	// ticket per (queue, player). The service checks first, but the database is the
+	// guard that survives a race, so both stores enforce it.
+	for _, id := range m.waiting[ticket.Queue] {
+		if m.byID[id].PlayerID == ticket.PlayerID {
+			return Ticket{}, apierr.Conflict("player already has a waiting ticket in this queue").
+				WithDetail("queue", ticket.Queue)
+		}
+	}
+
 	m.serial++
 	ticket.ID = "q_" + strconv.FormatInt(m.serial, 36)
 	ticket.Status = StatusWaiting
