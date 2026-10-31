@@ -21,11 +21,17 @@ const queryTimeout = 3 * time.Second
 // The in-memory store used a map, which forgot everything on restart - exactly
 // when a retry is most likely.
 type PG struct {
+	// pool is nil when the store is bound to an existing transaction.
 	pool *pgxpool.Pool
+	db   pg.DB
 }
 
 // NewPG builds the SQL-backed progression store.
-func NewPG(pool *pgxpool.Pool) *PG { return &PG{pool: pool} }
+func NewPG(pool *pgxpool.Pool) *PG { return &PG{pool: pool, db: pool} }
+
+// NewWithDB binds the store to an existing connection or transaction, so the
+// settlement fan-out can commit several domains together.
+func NewWithDB(db pg.DB) *PG { return &PG{db: db} }
 
 // Get implements Store.
 func (s *PG) Get(ctx context.Context, playerID string) (Progress, error) {
@@ -38,7 +44,7 @@ func (s *PG) Get(ctx context.Context, playerID string) (Progress, error) {
 		unlocks   []string
 		updatedAt time.Time
 	)
-	err := s.pool.QueryRow(ctx,
+	err := s.db.QueryRow(ctx,
 		`SELECT total_xp, level, unlocks, updated_at FROM player_progress WHERE player_id = $1`,
 		playerID).Scan(&totalXP, &level, &unlocks, &updatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -79,10 +85,10 @@ func (s *PG) GrantXP(ctx context.Context, playerID, idempotencyKey string, xp in
 		result  Progress
 		applied bool
 	)
-	err := pg.InTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := pg.RunInTx(ctx, s.pool, s.db, func(db pg.DB) error {
 		// ON CONFLICT DO NOTHING keeps the transaction alive on a replay (unlike a
 		// unique violation), so the read below can happen in the same transaction.
-		tag, err := tx.Exec(ctx,
+		tag, err := db.Exec(ctx,
 			`INSERT INTO progress_grants (player_id, idempotency_key, xp, reason)
 			 VALUES ($1, $2, $3, $4)
 			 ON CONFLICT (player_id, idempotency_key) DO NOTHING`,
@@ -95,7 +101,7 @@ func (s *PG) GrantXP(ctx context.Context, playerID, idempotencyKey string, xp in
 			return err
 		}
 		if tag.RowsAffected() == 0 {
-			current, err := s.get(ctx, tx, playerID)
+			current, err := s.get(ctx, db, playerID)
 			if err != nil {
 				return err
 			}
@@ -106,7 +112,7 @@ func (s *PG) GrantXP(ctx context.Context, playerID, idempotencyKey string, xp in
 		// total_xp is monotonic; the level curve stays in Go (levelFor), so a
 		// second copy of "1000" never appears in SQL.
 		var totalXP int64
-		if err := tx.QueryRow(ctx,
+		if err := db.QueryRow(ctx,
 			`INSERT INTO player_progress (player_id, total_xp, level, updated_at)
 			 VALUES ($1, $2, 1, now())
 			 ON CONFLICT (player_id) DO UPDATE
@@ -116,13 +122,13 @@ func (s *PG) GrantXP(ctx context.Context, playerID, idempotencyKey string, xp in
 			playerID, xp).Scan(&totalXP); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx,
+		if _, err := db.Exec(ctx,
 			`UPDATE player_progress SET level = $2 WHERE player_id = $1 AND level <> $2`,
 			playerID, levelFor(totalXP)); err != nil {
 			return err
 		}
 
-		current, err := s.get(ctx, tx, playerID)
+		current, err := s.get(ctx, db, playerID)
 		if err != nil {
 			return err
 		}

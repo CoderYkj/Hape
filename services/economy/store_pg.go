@@ -25,17 +25,25 @@ const movementTimeout = 3 * time.Second
 // the service layer and the HTTP contract do not know or care which one is
 // mounted.
 type PG struct {
+	// pool is nil when the store is bound to an existing transaction; in that
+	// case it must not try to begin another one.
 	pool *pgxpool.Pool
+	db   pg.DB
 }
 
-// NewPG builds the SQL-backed economy store.
-func NewPG(pool *pgxpool.Pool) *PG { return &PG{pool: pool} }
+// NewPG builds the SQL-backed economy store. Reads and single movements manage
+// their own transactions.
+func NewPG(pool *pgxpool.Pool) *PG { return &PG{pool: pool, db: pool} }
+
+// NewWithDB binds the store to an existing connection or transaction, so several
+// domains can commit together (platform/sink.go settles a match that way).
+func NewWithDB(db pg.DB) *PG { return &PG{db: db} }
 
 // Wallet implements Store.
 func (s *PG) Wallet(ctx context.Context, playerID string) (Wallet, error) {
 	ctx, cancel := context.WithTimeout(ctx, movementTimeout)
 	defer cancel()
-	return s.wallet(ctx, s.pool, playerID)
+	return s.wallet(ctx, s.db, playerID)
 }
 
 // Grant implements Store.
@@ -65,7 +73,7 @@ func (s *PG) Ledger(ctx context.Context, playerID string) ([]LedgerEntry, error)
 	ctx, cancel := context.WithTimeout(ctx, movementTimeout)
 	defer cancel()
 
-	rows, err := s.pool.Query(ctx,
+	rows, err := s.db.Query(ctx,
 		`SELECT id, currency, amount, reason, created_at
 		   FROM ledger_entries
 		  WHERE player_id = $1
@@ -112,31 +120,39 @@ func (s *PG) movement(ctx context.Context, playerID, idempotencyKey, currency st
 		wallet  Wallet
 		applied bool
 	)
-	err := pg.InTx(ctx, s.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx,
+	err := pg.RunInTx(ctx, s.pool, s.db, func(db pg.DB) error {
+		// ON CONFLICT DO NOTHING rather than a caught unique violation: a failed
+		// statement aborts the whole transaction, which would take a caller's
+		// larger settlement transaction down with it. DO NOTHING keeps it alive.
+		tag, err := db.Exec(ctx,
 			`INSERT INTO ledger_entries (player_id, currency, amount, reason, idempotency_key)
-			 VALUES ($1, $2, $3, $4, $5)`,
-			playerID, currency, delta, reason, idempotencyKey); err != nil {
+			 VALUES ($1, $2, $3, $4, $5)
+			 ON CONFLICT (player_id, idempotency_key) DO NOTHING`,
+			playerID, currency, delta, reason, idempotencyKey)
+		if err != nil {
 			// A movement must reference a real player. The memory store cannot
 			// enforce that (it has no account table); the database can, and does.
-			// Turn it into a domain answer instead of a 500.
 			if pg.IsForeignKeyViolation(err) {
 				return apierr.Invalid("unknown player_id: money cannot reference a player that does not exist").
 					WithDetail("player_id", playerID)
 			}
-			if pg.IsUniqueViolation(err) {
-				// Same key, same player: this movement already happened. The
-				// statement aborted the transaction, so the wallet cannot be read
-				// here - the caller reads it after the rollback.
-				return errReplay
-			}
 			return err
+		}
+		if tag.RowsAffected() == 0 {
+			// Same key, same player: this movement already happened. Report the
+			// wallet as it stands now and let the caller answer applied=false.
+			current, err := s.wallet(ctx, db, playerID)
+			if err != nil {
+				return err
+			}
+			wallet, applied = current, false
+			return nil
 		}
 
 		if delta > 0 {
 			// A grant can upsert: the proposed row is positive, so the balance
 			// CHECK holds whether the statement inserts or adds.
-			if _, err := tx.Exec(ctx,
+			if _, err := db.Exec(ctx,
 				`INSERT INTO wallets (player_id, currency, balance, updated_at)
 				 VALUES ($1, $2, $3, now())
 				 ON CONFLICT (player_id, currency) DO UPDATE
@@ -151,7 +167,7 @@ func (s *PG) movement(ctx context.Context, playerID, idempotencyKey, currency st
 			// negative delta trips wallets_balance_check on the imaginary row
 			// (0 - 60) instead of adding to the real balance. Guarded UPDATE it is:
 			// no matching row (missing wallet or not enough funds) means refused.
-			tag, err := tx.Exec(ctx,
+			tag, err := db.Exec(ctx,
 				`UPDATE wallets
 				    SET balance = balance + $3, updated_at = now()
 				  WHERE player_id = $1 AND currency = $2 AND balance + $3 >= 0`,
@@ -164,7 +180,7 @@ func (s *PG) movement(ctx context.Context, playerID, idempotencyKey, currency st
 			}
 		}
 
-		current, err := s.wallet(ctx, tx, playerID)
+		current, err := s.wallet(ctx, db, playerID)
 		if err != nil {
 			return err
 		}
@@ -172,28 +188,16 @@ func (s *PG) movement(ctx context.Context, playerID, idempotencyKey, currency st
 		return nil
 	})
 	switch {
-	case errors.Is(err, errReplay):
-		// A replay is a success with applied=false: return the wallet as it
-		// stands now, which may have moved on since the original movement.
-		current, err := s.wallet(ctx, s.pool, playerID)
-		if err != nil {
-			return Wallet{}, false, err
-		}
-		return current, false, nil
 	case errors.Is(err, errInsufficientBalance):
-		return Wallet{}, false, s.insufficientBalance(ctx, s.pool, playerID, currency, -delta)
+		return Wallet{}, false, s.insufficientBalance(ctx, s.db, playerID, currency, -delta)
 	case err != nil:
 		return Wallet{}, false, err
 	}
 	return wallet, applied, nil
 }
 
-// errReplay is an internal sentinel: the idempotency key was already used, and
-// the aborted transaction means the wallet has to be read outside it.
-var errReplay = errors.New("economy: idempotency key already applied")
-
-// errInsufficientBalance is an internal sentinel: the CHECK constraint said no,
-// and the caller turns it into a domain error with the numbers attached.
+// errInsufficientBalance is an internal sentinel: the guarded UPDATE matched no
+// row, and the caller turns it into a domain error with the numbers attached.
 var errInsufficientBalance = errors.New("economy: insufficient balance")
 
 func (s *PG) insufficientBalance(ctx context.Context, db pg.DB, playerID, currency string, required int64) error {

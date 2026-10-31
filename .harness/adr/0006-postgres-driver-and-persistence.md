@@ -63,8 +63,9 @@ handler、契约层、`platform` 的服务装配都不 import 驱动类型。
 1. ~~**`Store` 方法没有 `context`**~~ → **已还**（spec 0003）：每个 Store 方法第一个
    参数是 `ctx`，SQL 实现用 `context.WithTimeout(ctx, 3s)`，请求取消能一路传到数据库。
    有测试钉住：已取消的 ctx 下查询立刻返回 `context.Canceled`。
-2. **跨域结算不是单个事务**。`platform/sink.go` 依次写进度、经济、排行，各自幂等，
-   但不是一个事务；中途失败靠"同一 `result_id` 重试"收敛，而不是原子性。
+2. ~~**跨域结算不是单个事务**~~ → **已还**（ADR 0007 / spec 0005）：数据库模式下
+   一次结算（战报 + 三个域 + 会话状态）在同一个事务里提交，失败全回滚。
+   内存模式仍只能做到幂等收敛。拆分进程时必须改 outbox，ADR 0007 已写死。
 3. ~~**两个无 error 返回的查询会静默降级**~~ → **已还**（spec 0004）：
    `rank.RatingOf` 与 `matchmaking.FindWaitingByPlayer` 都返回 error，调用方把失败
    变成 `503 unavailable`，不再替玩家猜 MMR、也不再把"查不到"当成"没在排队"。

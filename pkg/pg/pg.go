@@ -96,3 +96,19 @@ func InTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) error) err
 	committed = true
 	return nil
 }
+
+// RunInTx runs fn inside a transaction when pool is non-nil, and directly against
+// db when the caller already opened one (pool == nil).
+//
+// This is the seam that lets one domain write standalone *and* participate in a
+// larger settlement transaction without a second implementation: the store does
+// not care whether it owns the transaction, only that it has a pg.DB.
+func RunInTx(ctx context.Context, pool *pgxpool.Pool, db DB, fn func(DB) error) error {
+	if pool == nil {
+		if db == nil {
+			return errors.New("pg: no pool and no transaction")
+		}
+		return fn(db)
+	}
+	return InTx(ctx, pool, func(tx pgx.Tx) error { return fn(tx) })
+}

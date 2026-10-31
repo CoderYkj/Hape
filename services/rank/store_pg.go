@@ -21,11 +21,17 @@ const queryTimeout = 3 * time.Second
 // (board, player_id, idempotency_key) is the idempotency guard: replaying a
 // match cannot move the ladder twice.
 type PG struct {
+	// pool is nil when the store is bound to an existing transaction.
 	pool *pgxpool.Pool
+	db   pg.DB
 }
 
 // NewPG builds the SQL-backed rating store.
-func NewPG(pool *pgxpool.Pool) *PG { return &PG{pool: pool} }
+func NewPG(pool *pgxpool.Pool) *PG { return &PG{pool: pool, db: pool} }
+
+// NewWithDB binds the store to an existing connection or transaction, so the
+// settlement fan-out can commit several domains together.
+func NewWithDB(db pg.DB) *PG { return &PG{db: db} }
 
 // RatingOf implements Store.
 //
@@ -37,7 +43,7 @@ func (s *PG) RatingOf(ctx context.Context, board, playerID string) (int64, error
 	defer cancel()
 
 	var rating int64
-	err := s.pool.QueryRow(ctx,
+	err := s.db.QueryRow(ctx,
 		`SELECT rating FROM player_ratings WHERE board = $1 AND player_id = $2`,
 		board, playerID).Scan(&rating)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -64,11 +70,11 @@ func (s *PG) Apply(ctx context.Context, board, playerID, idempotencyKey string, 
 		delta   int64
 		applied bool
 	)
-	err := pg.InTx(ctx, s.pool, func(tx pgx.Tx) error {
+	err := pg.RunInTx(ctx, s.pool, s.db, func(db pg.DB) error {
 		// Create the row first (no-op if present), then lock it. Locking order is
 		// (insert, select for update) so two concurrent applies for one player
 		// serialize instead of both reading the same old rating.
-		if _, err := tx.Exec(ctx,
+		if _, err := db.Exec(ctx,
 			`INSERT INTO player_ratings (board, player_id, rating) VALUES ($1, $2, $3)
 			 ON CONFLICT (board, player_id) DO NOTHING`,
 			board, playerID, DefaultRating); err != nil {
@@ -80,7 +86,7 @@ func (s *PG) Apply(ctx context.Context, board, playerID, idempotencyKey string, 
 		}
 
 		var current Rating
-		if err := tx.QueryRow(ctx,
+		if err := db.QueryRow(ctx,
 			`SELECT rating, wins, losses FROM player_ratings
 			  WHERE board = $1 AND player_id = $2 FOR UPDATE`,
 			board, playerID).Scan(&current.Rating, &current.Wins, &current.Losses); err != nil {
@@ -100,7 +106,7 @@ func (s *PG) Apply(ctx context.Context, board, playerID, idempotencyKey string, 
 			next = MinRating
 		}
 
-		tag, err := tx.Exec(ctx,
+		tag, err := db.Exec(ctx,
 			`INSERT INTO rating_events (board, player_id, idempotency_key, delta, rating_after)
 			 VALUES ($1, $2, $3, $4, $5)
 			 ON CONFLICT (board, player_id, idempotency_key) DO NOTHING`,
@@ -111,7 +117,7 @@ func (s *PG) Apply(ctx context.Context, board, playerID, idempotencyKey string, 
 		if tag.RowsAffected() == 0 {
 			// The match was already applied to this player: report no movement.
 			// The row lock is released by the rollback below.
-			existing, err := s.rating(ctx, tx, board, playerID)
+			existing, err := s.rating(ctx, db, board, playerID)
 			if err != nil {
 				return err
 			}
@@ -119,7 +125,7 @@ func (s *PG) Apply(ctx context.Context, board, playerID, idempotencyKey string, 
 			return nil
 		}
 
-		if _, err := tx.Exec(ctx,
+		if _, err := db.Exec(ctx,
 			`UPDATE player_ratings SET rating = $3, wins = $4, losses = $5, updated_at = now()
 			  WHERE board = $1 AND player_id = $2`,
 			board, playerID, next, current.Wins, current.Losses); err != nil {
@@ -145,7 +151,7 @@ func (s *PG) Top(ctx context.Context, board string, limit int) (Leaderboard, err
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.pool.Query(ctx,
+	rows, err := s.db.Query(ctx,
 		`SELECT player_id, rating, wins, losses
 		   FROM player_ratings
 		  WHERE board = $1

@@ -126,11 +126,13 @@ func New(cfg Config) (*Platform, error) {
 		economyStore     economy.Store
 		rankStore        rank.Store
 	)
+	var pool *pgxpool.Pool
 	if cfg.DatabaseURL != "" {
-		pool, err := pg.Open(context.Background(), cfg.DatabaseURL)
+		opened, err := pg.Open(context.Background(), cfg.DatabaseURL)
 		if err != nil {
 			return nil, fmt.Errorf("platform: open database: %w", err)
 		}
+		pool = opened
 		p.pool = pool
 		accountStore = account.NewPG(pool)
 		teamStore = team.NewPG(pool)
@@ -163,6 +165,7 @@ func New(cfg Config) (*Platform, error) {
 	p.Matchmaking = matchmaking.NewWithStore(log.With("domain", "matchmaking"), matchmakingStore, p.Rank.Rating)
 	p.Session = session.NewWithStore(log.With("domain", "session"), sessionStore, alloc, &matchSink{
 		log:      log.With("domain", "match_sink"),
+		pool:     pool,
 		progress: p.Progress,
 		economy:  p.Economy,
 		rank:     p.Rank,
