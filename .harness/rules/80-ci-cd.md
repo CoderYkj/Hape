@@ -45,12 +45,12 @@ Agent 边界：**不得**执行任何 staging/prod 部署命令。只允许本�
 - 破坏性变更必须能回滚；回滚方案写进 spec 的"回滚"一节。
 - 迁移在部署前独立执行，不做"应用启动自动迁移"。
 - 迁移必须配探针：`db/probes/*.probe.sql` 断言"该拒的必须被拒"。本机用
-  `scripts/pg-local.ps1 -Action probe` 跑；CI 目前没有 Postgres 服务，
-  所以探针**不在 CI 里**，别把"CI 绿"当成 schema 已验证。
-- 同理：`services/*/store_equiv_test.go` 在无 `BACKEND_TEST_DATABASE_URL` 时 **skip**。
-  看到 `ok` 不等于 SQL 路径跑过，要看的是 `-run TestStoresAgree -v` 里没有 `SKIP`。
-- 想让这些进 CI，要给 workflow 加 `services: postgres:16` + 一次 `migrate`；这一步
-  尚未验证，别写成已完成。
+  `scripts/pg-local.cmd -Action probe` 跑，CI 里也跑（见下）。
+- `services/*/store_equiv_test.go` 在无 `BACKEND_TEST_DATABASE_URL` 时 **skip**。
+  本机直接 `go test ./...` 会看到 skip——那是正常的，别把"本机绿"当成 SQL 路径跑过。
+- **CI 有 Postgres**：workflow 起 `postgres:16` service，依次 `migrate` →
+  `schema probes` → `go test -race ./...`（带 `BACKEND_TEST_DATABASE_URL`）。
+  所以 CI 绿 = race 跑过 + 七个等价性测试在真库上跑过 + 约束探针通过。
 
 ## 发布检查单
 

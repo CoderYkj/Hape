@@ -1,5 +1,7 @@
 # gamebackend — 战斗后端脚手架
 
+[![CI](https://github.com/CoderYkj/Hape/actions/workflows/ci.yml/badge.svg)](https://github.com/CoderYkj/Hape/actions/workflows/ci.yml)
+
 UE5 Dedicated Server 扛战斗内权威，Nakama 扛账号/社交，Go 微服务扛
 账号/队伍/匹配/会话/进度/经济/排行；早期战斗服走托管厂商，通过抽象
 分配层接入。
@@ -102,9 +104,10 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 - Go 侧没有一行连数据库：7 个服务仍是内存存储（M1 的事，先定驱动，见 ADR 0006）
 - `docs/ue5-ds-integration.md` 里的 C++ 片段：未在 UE5 工程里编译
 - 真实托管战斗服（GameLift / EdgeGap / Agones）：只有接口与桩实现
-- `go test -race ./...`：本机没有 C 编译器（cgo 缺席）跑不了；CI 的 Linux
-  runner 有 gcc，那里是真跑的。`verify.ps1 -Race` 在缺编译器时打印 SKIP，
-  别把 SKIP 当通过
+- **CI 全绿**（GitHub Actions，`ubuntu-latest`）：`gofmt` / `go vet` / `go build` /
+  `go test -race`（含真 Postgres 里的七个等价性测试）/ schema 探针 / 契约漂移。
+  本机没有 C 编译器，`-race` 只能在这里真跑——所以它不是"本机已验证"，
+  而是"CI 已验证"。
 
 不要因为某文件"看起来完整"就假设它跑通了——以这一节为准。
 

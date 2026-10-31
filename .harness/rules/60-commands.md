@@ -64,6 +64,12 @@ go run ./tools/apigen -check
 > `scripts/verify.ps1 -Race` 会打印 SKIP 并继续，不要把 SKIP 当成通过；
 > CI 的 Linux runner 自带 gcc，那里是真跑的。
 
+## CI
+
+推送 `main` 或开 PR 会跑 `.github/workflows/ci.yml`；它比本机多两件事：
+`-race`（需要 cgo，本机没有 C 编译器）和带 Postgres 的等价性测试。
+本机 `verify` 绿不代表 CI 绿，反之亦然——两边都跑才算数。
+
 ## 数据库相关
 
 ```bash

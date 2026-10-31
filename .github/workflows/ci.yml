@@ -3,7 +3,11 @@
 # larger repo, move this file to that repo's .github/workflows and add
 # `defaults: run: working-directory: <backend-dir>`.
 #
-# Mirrors `scripts/verify.sh` step by step; keep them in sync.
+# Mirrors `scripts/verify.sh` step by step, and adds what a developer machine
+# cannot do: the race detector (needs cgo) and the PostgreSQL-backed tests
+# (need a database). Both are run here, for real, on every push.
+#
+#   first run: https://github.com/CoderYkj/Hape/actions/runs/41191405286 (success)
 
 name: backend
 
@@ -18,15 +22,33 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      # The equivalence suites (services/*/store_equiv_test.go) skip without a
+      # database; the point of this service is that they do not skip here.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: gamebackend
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/gamebackend?sslmode=disable
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          # The module graph is the standard library only, so there is nothing
-          # for setup-go to cache.
-          cache: false
+          # There is exactly one third-party dependency (pgx, ADR 0006), so the
+          # module cache is worth keeping between runs.
+          cache: true
 
       - name: gofmt
         run: |
@@ -43,7 +65,23 @@ jobs:
       - name: go build
         run: go build ./...
 
-      - name: go test (race)
+      - name: migrate
+        run: |
+          for f in db/migrations/*.sql; do
+            echo "applying $f"
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      - name: schema probes
+        run: |
+          for f in db/probes/*.probe.sql; do
+            echo "probing $f"
+            psql "$DATABASE_URL" -t -q -v ON_ERROR_STOP=1 -f "$f"
+          done
+
+      - name: go test (race, with database)
+        env:
+          BACKEND_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/gamebackend?sslmode=disable
         run: go test -race ./...
 
       - name: contract drift
