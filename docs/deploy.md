@@ -95,7 +95,7 @@ BACKEND_BASE_URL=http://backend:8080 \
 | `BACKEND_DEV_AUTH` | `true` | `true` 时挂 `DevAuth`；`false` 时必须注入真实认证器，否则拒绝启动 |
 | `BACKEND_SERVICE_TOKEN` | 空 | 服务间 token；`prod` 或关闭 dev auth 时必填 |
 | `BACKEND_ALLOCATOR` | `local` | `local` / `gamelift` / `edgegap` / `agones`；后三者是返回 `ErrNotConfigured` 的桩 |
-| `BACKEND_DATABASE_URL` | 空 | v0 不读（内存存储）；M1 开始生效 |
+| `BACKEND_DATABASE_URL` | 空 | 非空时 account / economy / progress / rank 走 Postgres；其余域仍内存 |
 | `BACKEND_REGIONS` | `local` | 逗号分隔的区域列表 |
 | `BACKEND_RECONCILE_INTERVAL` | `0`（关闭） | 超时会话清理的周期，如 `30s`；格式错误启动即失败 |
 | `BACKEND_SESSION_STALE_AFTER` | `5m` | 会话在 `allocating`/`ready` 停留多久算死；必须为正 |

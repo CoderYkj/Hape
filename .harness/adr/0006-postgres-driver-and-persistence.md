@@ -46,6 +46,10 @@ handler、契约层、`platform` 的服务装配都不 import 驱动类型。
 4. **迁移按域推进**，不搞一次性大爆炸：每个域一个 `store_pg.go` + 一组等价性测试。
    装配日志明确打印每个域用的是 `memory` 还是 `postgres`。
 
+已迁域：`account`、`economy`、`progress`、`rank`（4/7）。未迁：`team`、
+`matchmaking`、`session`。迁移文件目前两个：`0001_init.sql`（全量 schema）、
+`0002_progress_grants.sql`（经验幂等承载表，因为 `player_progress` 只有累计值）。
+
 ## 已知债务（写下来，别假装不存在）
 
 1. **`Store` 方法没有 `context`**。SQL 实现只能自己 `context.WithTimeout(3s)`，

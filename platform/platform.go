@@ -111,12 +111,18 @@ func New(cfg Config) (*Platform, error) {
 		sessionStaleAfter: staleAfter,
 	}
 	p.Team = team.New(log.With("domain", "team"))
-	p.Progress = progress.New(log.With("domain", "progress"))
-	// Accounts and economy move first (M1, ADR 0006): money carries a foreign key
-	// to players, so migrating one without the other would break payouts. The log
-	// line says which store each domain runs on, so nobody has to guess.
-	var economyStore economy.Store
-	var accountStore account.Store
+	// Stores are chosen per domain, and the choice is logged so nobody has to
+	// guess which half of the backend survives a restart.
+	//
+	// Migrated so far (M1, spec 0002): account, economy, progress, rank. They move
+	// together because money and XP carry foreign keys to players and the match
+	// sink writes all three in one fan-out.
+	var (
+		accountStore  account.Store
+		economyStore  economy.Store
+		progressStore progress.Store
+		rankStore     rank.Store
+	)
 	if cfg.DatabaseURL != "" {
 		pool, err := pg.Open(context.Background(), cfg.DatabaseURL)
 		if err != nil {
@@ -125,17 +131,24 @@ func New(cfg Config) (*Platform, error) {
 		p.pool = pool
 		accountStore = account.NewPG(pool)
 		economyStore = economy.NewPG(pool)
-		log.Info("store selected", "domain", "account", "store", "postgres")
-		log.Info("store selected", "domain", "economy", "store", "postgres")
+		progressStore = progress.NewPG(pool)
+		rankStore = rank.NewPG(pool)
+		for _, domain := range []string{"account", "economy", "progress", "rank"} {
+			log.Info("store selected", "domain", domain, "store", "postgres")
+		}
 	} else {
 		accountStore = account.NewMemory()
 		economyStore = economy.NewMemory()
-		log.Info("store selected", "domain", "account", "store", "memory")
-		log.Info("store selected", "domain", "economy", "store", "memory")
+		progressStore = progress.NewMemory()
+		rankStore = rank.NewMemory()
+		for _, domain := range []string{"account", "economy", "progress", "rank"} {
+			log.Info("store selected", "domain", domain, "store", "memory")
+		}
 	}
 	p.Account = account.NewWithStore(log.With("domain", "account"), accountStore)
 	p.Economy = economy.NewWithStore(log.With("domain", "economy"), economyStore)
-	p.Rank = rank.New(log.With("domain", "rank"))
+	p.Progress = progress.NewWithStore(log.With("domain", "progress"), progressStore)
+	p.Rank = rank.NewWithStore(log.With("domain", "rank"), rankStore)
 	p.Matchmaking = matchmaking.New(log.With("domain", "matchmaking"), p.Rank.Rating)
 	p.Session = session.New(log.With("domain", "session"), alloc, &matchSink{
 		log:      log.With("domain", "match_sink"),

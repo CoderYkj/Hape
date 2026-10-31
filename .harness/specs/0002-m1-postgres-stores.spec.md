@@ -1,6 +1,6 @@
 # 0002 - M1 持久化：账号与经济先落 Postgres
 
-- 状态：in progress（1/7 域已落库：account、economy）
+- 状态：in progress（4/7 域已落库：account、economy、progress、rank）
 - 日期：2026-01-01
 - 关联 ADR：0006（驱动与策略）、0005（模块化单体）
 - 涉及服务：account、economy（本批）；其余五个域仍内存
@@ -11,9 +11,14 @@ M0 证明了这条链是通的，但所有数据都在内存里：进程一重�
 `db/migrations/0001_init.sql` 已经写好并在 Postgres 16.4 上验证过约束，缺的是
 Go 侧的实现与装配。
 
-本规格只覆盖**第一批**：account + economy。理由是它们互为前提——
-`ledger_entries.player_id` 有外键指向 `players`，只迁经济不迁账号，发钱会直接失败
-（这是数据完整性，不是耦合失误）。其余五个域按同样的模板逐个跟进。
+第一批：account + economy。理由是它们互为前提——`ledger_entries.player_id` 有外键
+指向 `players`，只迁经济不迁账号，发钱会直接失败（这是数据完整性，不是耦合失误）。
+
+第二批：progress + rank。它们同属"结算扇出"的三个目标域之一，且 rank 的
+`rating_events` 天然带幂等主键；progress 需要一个新表（`0002_progress_grants.sql`）
+承载幂等键，因为 `player_progress` 只有累计值。
+
+余下三个域（team / matchmaking / session）按同样模板跟进。
 
 ## 2. 目标 / 非目标
 
@@ -62,6 +67,8 @@ Then  每一步的 applied 标志、余额、错误码、账本内容完全一�
 |---|---|
 | account | `players` |
 | economy | `wallets`、`ledger_entries` |
+| progress | `player_progress`、`progress_grants`（迁移 0002 新增） |
+| rank | `player_ratings`、`rating_events` |
 
 ## 6. 不变量与失败模式
 
@@ -85,6 +92,8 @@ Then  每一步的 applied 标志、余额、错误码、账本内容完全一�
 |---|---|
 | 等价性 | account：首次登录 / 重复登录 / 读取 / 改名 / 未知 id / 空 external_id |
 | 等价性 | economy：首次入账 / 幂等重放 / 扣费 / 余额不足 / 未知货币 / 金额 0 / 非正数 |
+| 等价性 | progress：首次读取 / 入账 / 幂等重放 / 跨级（140+900=1040 → 2 级）/ 空键 / 0 XP |
+| 等价性 | rank：首评 1000 / 胜 +24 / 幂等重放不位移 / 负 -16 / 空键 / 62 连败夹到下限 100 / 榜单顺序 |
 | 数据库约束 | `db/probes/0001_constraints.probe.sql`（35 条，psql 直接跑） |
 | 端到端 | `platform` + `fakeds`，`BACKEND_DATABASE_URL` 指向真库，检查落库行 |
 | 内存路径 | 全部既有测试（`go test ./...`）在无 `BACKEND_DATABASE_URL` 时仍必须全绿 |

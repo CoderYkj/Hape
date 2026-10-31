@@ -66,7 +66,7 @@ scripts\pg-local.cmd -Action probe     # 跑 db/probes/*.probe.sql
 
 ## 已验证（本机实跑）
 
-- `db/migrations/0001_init.sql` 应用成功，13 张表
+- `db/migrations/0001_init.sql` + `0002_progress_grants.sql` 应用成功，15 张表
 - `db/probes/0001_constraints.probe.sql`：**35 PASS / 0 FAIL**
 - 重复 `migrate` 正确跳过（幂等）
 - 修掉的真实缺陷：`matchmaking_tickets.status` 缺 `DEFAULT 'waiting'`，
@@ -74,8 +74,9 @@ scripts\pg-local.cmd -Action probe     # 跑 db/probes/*.probe.sql
 
 ## 未验证 / 未做
 
-- Go 侧没有任何一行连数据库：7 个服务仍跑 `services/*/store.go` 的内存实现。
-  接 SQL store 是 M1，需要先定驱动（见 ADR 0006）。
+- **4/7 域已接线**：account、economy、progress、rank 走 Postgres；team、
+  matchmaking、session 仍是内存实现（`services/*/store.go` 的 `Memory`）。
+- 等价性测试（`services/*/store_equiv_test.go`）在本机真库上跑过，但**不在 CI 里**。
 - 没有 CI：CI 里没有 Postgres 服务，`probe` 目前只能手工跑。要进 CI 得给
   workflow 加 `services: postgres`，那一步没验证过。
 - 没有备份、没有复制、没有连接池调优、没有密码策略。
