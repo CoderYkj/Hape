@@ -154,7 +154,9 @@ func newServer(t *testing.T) *httptest.Server {
 
 func login(t *testing.T, server *httptest.Server, externalID string) (playerID, token string) {
 	t.Helper()
-	status, body := newClient(t, server.URL, "").do(http.MethodPost, "/v1/account/sessions",
+	// ADR 0010: login is a service-only exchange. The client never calls it - the
+	// Nakama plugin does, with a service credential.
+	status, body := newClient(t, server.URL, serviceToken).do(http.MethodPost, "/v1/account/sessions",
 		map[string]any{"external_id": externalID})
 	expect(t, status, http.StatusOK, "login "+externalID)
 	return atString(t, body, "player.id"), atString(t, body, "session_token")
@@ -352,7 +354,15 @@ func TestErrorContract(t *testing.T) {
 	server := newServer(t)
 	anon := newClient(t, server.URL, "")
 
-	status, body := anon.do(http.MethodPost, "/v1/account/sessions", map[string]any{"bogus_field": "x"})
+	// Anonymous callers are rejected before the body is even looked at.
+	status, body := anon.do(http.MethodPost, "/v1/account/sessions", map[string]any{"external_id": "someone"})
+	expect(t, status, http.StatusUnauthorized, "anonymous login")
+	if code := atString(t, body, "error.code"); code != "unauthenticated" {
+		t.Fatalf("anonymous login: code = %q, want unauthenticated", code)
+	}
+
+	service := newClient(t, server.URL, serviceToken)
+	status, body = service.do(http.MethodPost, "/v1/account/sessions", map[string]any{"bogus_field": "x"})
 	expect(t, status, http.StatusBadRequest, "unknown field")
 	if code := atString(t, body, "error.code"); code != "invalid_argument" {
 		t.Fatalf("error code = %q, want invalid_argument", code)
@@ -361,8 +371,12 @@ func TestErrorContract(t *testing.T) {
 	_, token := login(t, server, "nakama-user-3")
 	player := newClient(t, server.URL, token)
 
-	status, _ = player.do(http.MethodPost, "/v1/account/sessions", map[string]any{})
+	status, _ = service.do(http.MethodPost, "/v1/account/sessions", map[string]any{})
 	expect(t, status, http.StatusBadRequest, "missing external_id")
+
+	// A player token is not a service credential.
+	status, _ = player.do(http.MethodPost, "/v1/account/sessions", map[string]any{"external_id": "someone"})
+	expect(t, status, http.StatusUnauthorized, "login with a player token")
 
 	status, body = player.do(http.MethodGet, "/v1/account/players/p_missing", nil)
 	expect(t, status, http.StatusForbidden, "reading a stranger's profile")
@@ -371,7 +385,6 @@ func TestErrorContract(t *testing.T) {
 	}
 
 	// Writes that need an idempotency key must say so.
-	service := newClient(t, server.URL, serviceToken)
 	status, body = service.do(http.MethodPost, "/v1/progress/players/p_1/xp", map[string]any{"xp": 10, "reason": "test"})
 	expect(t, status, http.StatusBadRequest, "grant without Idempotency-Key")
 	if code := atString(t, body, "error.code"); code != "invalid_argument" {

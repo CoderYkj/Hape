@@ -46,6 +46,10 @@ type Config struct {
 	JWTKey string
 	// JWTIssuer, when set, is checked against the token's `iss`.
 	JWTIssuer string
+	// PlayerTokenTTL is how long a backend-issued player token lives (default 1h).
+	PlayerTokenTTL time.Duration
+	// PlayerJWTKey signs player tokens; empty means "use JWTKey".
+	PlayerJWTKey string
 	// Edgegap credentials, used only when Allocator is "edgegap".
 	EdgegapToken   string
 	EdgegapApp     string
@@ -175,6 +179,7 @@ func New(cfg Config) (*Platform, error) {
 	for _, domain := range []string{"account", "team", "matchmaking", "session", "progress", "economy", "rank"} {
 		log.Info("store selected", "domain", domain, "store", store)
 	}
+	var playerMinter account.TokenMinter
 	// Authentication comes after the stores because a real JWT authenticator needs
 	// to resolve Nakama's user id to a backend player id, which is the account
 	// store's job. Dev auth needs nothing.
@@ -184,8 +189,27 @@ func New(cfg Config) (*Platform, error) {
 			auth = httpx.NewDevAuth(cfg.ServiceToken)
 			log.Info("auth selected", "mode", "dev")
 		} else {
+			// A deployment that wants player tokens signed with a different key than
+			// Nakama's can set BACKEND_PLAYER_JWT_KEY; by default one key signs both and
+			// the iss claim keeps them apart.
+			playerKey := cfg.PlayerJWTKey
+			if playerKey == "" {
+				playerKey = cfg.JWTKey
+			}
+			playerIssuer, err := httpx.NewTokenIssuer([]byte(playerKey), cfg.PlayerTokenTTL)
+			if err != nil {
+				return nil, fmt.Errorf("platform: player token issuer: %w", err)
+			}
+			// Login mints a token this backend will accept back (iss=gamebackend).
+			// Without this, production would hand clients a dev token that the JWT
+			// verifier rejects - the login path would be broken outside dev (ADR 0010).
+			playerMinter = func(playerID string) (string, error) {
+				token, _, err := playerIssuer.Issue(playerID)
+				return token, err
+			}
 			jwtAuth, err := httpx.NewJWTAuth(httpx.JWTAuthConfig{
 				SecurityKey:  []byte(cfg.JWTKey),
+				PlayerKey:    []byte(playerKey),
 				ServiceToken: cfg.ServiceToken,
 				Issuer:       cfg.JWTIssuer,
 				Resolve: func(ctx context.Context, externalID string) (string, error) {
@@ -207,6 +231,9 @@ func New(cfg Config) (*Platform, error) {
 	p.router = router
 
 	p.Account = account.NewWithStore(log.With("domain", "account"), accountStore)
+	if playerMinter != nil {
+		p.Account.SetTokenMinter(playerMinter)
+	}
 	p.Team = team.NewWithStore(log.With("domain", "team"), teamStore)
 	p.Economy = economy.NewWithStore(log.With("domain", "economy"), economyStore)
 	p.Progress = progress.NewWithStore(log.With("domain", "progress"), progressStore)

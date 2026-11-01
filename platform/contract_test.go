@@ -112,9 +112,9 @@ func TestPlatformRefusesToStartWithoutAnAuthenticator(t *testing.T) {
 		t.Fatal("platform started with dev auth disabled and no authenticator injected")
 	}
 	// With a production authenticator built in, the refusal now names the missing
-	// JWT key (the thing that actually makes JWT mode impossible).
-	if !strings.Contains(err.Error(), "JWT") {
-		t.Fatalf("error = %v, want it to mention the missing JWT key", err)
+	// the missing key (whatever layer notices it first: the verifier or the issuer).
+	if !strings.Contains(err.Error(), "key") {
+		t.Fatalf("error = %v, want it to mention the missing key", err)
 	}
 }
 

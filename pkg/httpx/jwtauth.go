@@ -29,6 +29,7 @@ import (
 // job (see IdentityResolver), so pkg/httpx stays free of domain knowledge.
 type JWTAuth struct {
 	key          []byte
+	playerKey    []byte
 	serviceToken string
 	issuer       string
 	audience     string
@@ -36,6 +37,10 @@ type JWTAuth struct {
 	now          func() time.Time
 	resolve      IdentityResolver
 }
+
+// PlayerTokenIssuer is the iss claim of tokens this backend signs for its own players
+// (as opposed to the ones Nakama issues for sessions).
+const PlayerTokenIssuer = "gamebackend"
 
 // IdentityResolver maps an external identity (a Nakama user id) to a backend
 // player id. It must be read-only: authentication must not create accounts.
@@ -54,8 +59,13 @@ type JWTAuthConfig struct {
 	Leeway time.Duration
 	// Now is injectable for tests.
 	Now func() time.Time
-	// Resolve maps a verified Nakama user id to a backend player id.
+	// Resolve maps a verified Nakama user id to a backend player id. Not used for
+	// tokens this backend signed itself (iss=gamebackend): those already carry the
+	// backend player id.
 	Resolve IdentityResolver
+	// PlayerKey signs/verifies tokens this backend issues (iss=gamebackend). When
+	// empty, SecurityKey is used: one key, two issuers, separated by the iss claim.
+	PlayerKey []byte
 }
 
 // NewJWTAuth validates the configuration and returns the authenticator.
@@ -72,6 +82,9 @@ func NewJWTAuth(cfg JWTAuthConfig) (*JWTAuth, error) {
 	if cfg.Resolve == nil {
 		return nil, errors.New("httpx: identity resolver is required")
 	}
+	if len(cfg.PlayerKey) == 0 {
+		cfg.PlayerKey = cfg.SecurityKey
+	}
 	if cfg.Leeway <= 0 {
 		cfg.Leeway = 60 * time.Second
 	}
@@ -80,6 +93,7 @@ func NewJWTAuth(cfg JWTAuthConfig) (*JWTAuth, error) {
 	}
 	return &JWTAuth{
 		key:          cfg.SecurityKey,
+		playerKey:    cfg.PlayerKey,
 		serviceToken: cfg.ServiceToken,
 		issuer:       cfg.Issuer,
 		audience:     cfg.Audience,
@@ -96,18 +110,24 @@ func (a *JWTAuth) Player(r *http.Request) (Principal, error) {
 		return Principal{}, apierr.Unauthenticated("missing bearer token")
 	}
 
-	externalID, err := a.verify(token)
+	subject, issuer, err := a.verify(token)
 	if err != nil {
 		return Principal{}, err
 	}
 
-	playerID, err := a.resolve(r.Context(), externalID)
+	if issuer == PlayerTokenIssuer {
+		// This backend signed it: the subject already is the player id, so there is
+		// nothing to resolve and no database read on the hot path.
+		return Principal{PlayerID: subject}, nil
+	}
+
+	playerID, err := a.resolve(r.Context(), subject)
 	if err != nil {
 		// The token is valid but this backend has no player for it yet: the account
 		// has not been created, which is a 401 rather than a 500.
 		return Principal{}, apierr.Unauthenticated("no player for this identity").WithCause(err)
 	}
-	return Principal{PlayerID: playerID, ExternalID: externalID}, nil
+	return Principal{PlayerID: playerID, ExternalID: subject}, nil
 }
 
 // Service implements Authenticator. Service callers keep using the shared token:
@@ -124,64 +144,82 @@ func (a *JWTAuth) Service(r *http.Request) (Principal, error) {
 	return Principal{Service: "service"}, nil
 }
 
-// verify checks the signature, the algorithm and the time claims, and returns the
-// external identity.
-func (a *JWTAuth) verify(token string) (string, error) {
+// verify checks the algorithm, the signature (with the key that matches the issuer),
+// the time claims and the issuer, and returns the subject plus which issuer it came
+// from. Two issuers share the verifier: Nakama signs sessions (identity to be
+// resolved), this backend signs player tokens (subject is already the player id).
+func (a *JWTAuth) verify(token string) (subject, issuer string, err error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return "", apierr.Unauthenticated("malformed token")
+		return "", "", apierr.Unauthenticated("malformed token")
 	}
 
-	// The algorithm is taken from the header, so it must be pinned. Accepting
-	// "none" or letting the token choose is the classic JWT bypass.
 	var header struct {
 		Alg string `json:"alg"`
 		Typ string `json:"typ"`
 	}
 	if err := decodeSegment(parts[0], &header); err != nil {
-		return "", apierr.Unauthenticated("malformed token header")
+		return "", "", apierr.Unauthenticated("malformed token header")
 	}
 	if header.Alg != "HS256" {
-		return "", apierr.Unauthenticated("unsupported token algorithm").WithDetail("alg", header.Alg)
+		return "", "", apierr.Unauthenticated("unsupported token algorithm").WithDetail("alg", header.Alg)
+	}
+
+	// Claims are read before the signature check only to pick the right key; whether
+	// they can be trusted is still decided by the signature below.
+	var claims jwtClaims
+	if err := decodeSegment(parts[1], &claims); err != nil {
+		return "", "", apierr.Unauthenticated("malformed token claims")
+	}
+
+	var key []byte
+	switch claims.Iss {
+	case PlayerTokenIssuer:
+		key = a.playerKey
+	case a.issuerName():
+		key = a.key
+	default:
+		return "", "", apierr.Unauthenticated("unexpected token issuer").WithDetail("iss", claims.Iss)
 	}
 
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
-		return "", apierr.Unauthenticated("malformed token signature")
+		return "", "", apierr.Unauthenticated("malformed token signature")
 	}
-	mac := hmac.New(sha256.New, a.key)
+	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(parts[0] + "." + parts[1]))
 	if !hmac.Equal(signature, mac.Sum(nil)) {
-		return "", apierr.Unauthenticated("bad token signature")
-	}
-
-	var claims jwtClaims
-	if err := decodeSegment(parts[1], &claims); err != nil {
-		return "", apierr.Unauthenticated("malformed token claims")
+		return "", "", apierr.Unauthenticated("bad token signature")
 	}
 
 	now := a.now()
 	if claims.Exp == nil {
-		return "", apierr.Unauthenticated("token has no expiry")
+		return "", "", apierr.Unauthenticated("token has no expiry")
 	}
 	if now.After(time.Unix(*claims.Exp, 0).Add(a.leeway)) {
-		return "", apierr.Unauthenticated("token expired")
+		return "", "", apierr.Unauthenticated("token expired")
 	}
 	if claims.Iat != nil && time.Unix(*claims.Iat, 0).After(now.Add(a.leeway)) {
-		return "", apierr.Unauthenticated("token issued in the future")
+		return "", "", apierr.Unauthenticated("token issued in the future")
 	}
-	if a.issuer != "" && claims.Iss != a.issuer {
-		return "", apierr.Unauthenticated("unexpected token issuer").WithDetail("iss", claims.Iss)
-	}
-	if a.audience != "" && !claims.hasAudience(a.audience) {
-		return "", apierr.Unauthenticated("unexpected token audience")
+	// Player tokens are ours and carry no audience; session tokens do.
+	if claims.Iss != PlayerTokenIssuer && a.audience != "" && !claims.hasAudience(a.audience) {
+		return "", "", apierr.Unauthenticated("unexpected token audience")
 	}
 
 	externalID := claims.externalID()
 	if externalID == "" {
-		return "", apierr.Unauthenticated("token has no user id")
+		return "", "", apierr.Unauthenticated("token has no user id")
 	}
-	return externalID, nil
+	return externalID, claims.Iss, nil
+}
+
+// issuerName is the Nakama issuer this verifier expects ("nakama" unless configured).
+func (a *JWTAuth) issuerName() string {
+	if a.issuer != "" {
+		return a.issuer
+	}
+	return "nakama"
 }
 
 // jwtClaims is the subset of a Nakama session token this backend reads.
@@ -231,8 +269,48 @@ func decodeSegment[T any](segment string, out *T) error {
 	return json.Unmarshal(raw, out)
 }
 
-// SignHS256 builds a token with the same shape Nakama issues. It exists so tests
-// (and local tools) can mint tokens without a Nakama instance.
+// TokenIssuer mints player tokens for this backend (iss=gamebackend, sub=player id).
+//
+// A player token is deliberately short-lived and carries no claims beyond identity and
+// expiry: the client re-runs the RPC when it expires, which is exactly one round trip
+// and needs no refresh token machinery.
+type TokenIssuer struct {
+	key []byte
+	ttl time.Duration
+	now func() time.Time
+}
+
+// NewTokenIssuer builds the issuer. A key is required; a non-positive TTL defaults to
+// one hour.
+func NewTokenIssuer(key []byte, ttl time.Duration) (*TokenIssuer, error) {
+	if len(key) == 0 {
+		return nil, errors.New("httpx: player token key is required")
+	}
+	if ttl <= 0 {
+		ttl = time.Hour
+	}
+	return &TokenIssuer{key: key, ttl: ttl, now: time.Now}, nil
+}
+
+// Issue signs a token for playerID and reports when it expires.
+func (i *TokenIssuer) Issue(playerID string) (string, time.Time, error) {
+	if playerID == "" {
+		return "", time.Time{}, errors.New("httpx: player id is required to issue a token")
+	}
+	now := i.now()
+	expires := now.Add(i.ttl)
+	token, err := SignHS256(i.key, map[string]any{
+		"iss": PlayerTokenIssuer,
+		"sub": playerID,
+		"iat": now.Unix(),
+		"exp": expires.Unix(),
+	})
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return token, expires, nil
+}
+
 func SignHS256(key []byte, claims map[string]any) (string, error) {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
 	payload, err := json.Marshal(claims)

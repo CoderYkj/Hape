@@ -26,7 +26,10 @@
 | 步 | 请求 | 拿到什么 |
 |---|---|---|
 | ① | `POST {nakama}/v2/account/authenticate/device?create=true`，`Authorization: Basic base64(<serverKey>:)` | `token`（Nakama session）+ `user.id` |
-| ② | `POST {nakama}/v2/rpc/login?unwrap=true`，`Authorization: Bearer <Nakama token>` | 后端 `/v1/account/sessions` 的原文：`player.id` + `session_token` |
+| ② | `POST {nakama}/v2/rpc/login?unwrap=true`，`Authorization: Bearer <Nakama token>` | 后端 `/v1/account/sessions` 的原文：`player.id` + `session_token`（生产环境是后端签发的 JWT，`iss=gamebackend`） |
+
+> **`/v1/account/sessions` 不是客户端接口**：它是服务专属（ADR 0010），由 Nakama 插件
+> 用服务凭证调用。客户端拿到 token 的唯一途径是 ② 这个 RPC。
 | ③ | `GET {backend}/v1/account/players/{player_id}`，`Authorization: Bearer <backend token>` | 自己的档案 |
 | ④ | `POST {backend}/v1/matchmaking/tickets` `{"queue":"ranked_1v1"}` | `ticket.id`（`status=waiting`） |
 | ⑤ | `GET {backend}/v1/matchmaking/tickets/{id}` | 票据状态；匹配后被 `matched`，出现 `match_id` |

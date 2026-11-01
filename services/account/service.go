@@ -15,11 +15,20 @@ import (
 	"gamebackend/pkg/httpx"
 )
 
+// TokenMinter issues the player token returned by login. Nil keeps the development
+// format (`dev-player-<id>`), which only a dev authenticator accepts.
+type TokenMinter func(playerID string) (string, error)
+
 // Service is the account domain service.
 type Service struct {
-	log   *slog.Logger
-	store Store
+	log    *slog.Logger
+	store  Store
+	minter TokenMinter
 }
+
+// SetTokenMinter configures how login tokens are minted. The platform calls this when
+// dev auth is off; leaving it nil keeps the dev format for tests and local runs.
+func (s *Service) SetTokenMinter(m TokenMinter) { s.minter = m }
 
 // New builds the service with the in-memory store.
 func New(log *slog.Logger) *Service {
@@ -40,7 +49,7 @@ type LoginRequest struct {
 // LoginResponse is returned once per device login.
 type LoginResponse struct {
 	Player       Player `json:"player"`
-	SessionToken string `json:"session_token" doc:"Player token for subsequent calls. Dev builds return dev-player-<id>; production returns a signed JWT."`
+	SessionToken string `json:"session_token" doc:"Player token for subsequent calls: dev-player-<id> with dev auth, a signed JWT (iss=gamebackend) otherwise."`
 }
 
 // GetPlayerResponse is the profile read model.
@@ -68,9 +77,11 @@ func (s *Service) Register(r *httpx.Router) {
 		Summary:    "Exchange a verified Nakama identity for an internal player session",
 		Request:    api.Body(LoginRequest{}),
 		Response:   api.T(LoginResponse{}),
-		Auth:       api.AuthPublic,
+		Auth:       api.AuthService,
 		Idempotent: true,
-		Note:       "Idempotent by external_id: the same Nakama user always maps to the same player.",
+		Note: "Service-only on purpose (ADR 0010): the body carries an external identity, so " +
+			"only the Nakama plugin may call this. A client that could call it could claim to " +
+			"be any user and receive that player's token.",
 	}, s.login)
 
 	r.Handle(api.Op{
@@ -97,6 +108,11 @@ func (s *Service) Register(r *httpx.Router) {
 }
 
 func (s *Service) login(r *http.Request) (any, error) {
+	// Belt and braces: the contract already declares AuthService, so the router
+	// rejects anonymous callers; this keeps the handler honest on its own.
+	if _, err := httpx.RequireService(r); err != nil {
+		return nil, err
+	}
 	var req LoginRequest
 	if err := httpx.Decode(r, &req); err != nil {
 		return nil, err
@@ -110,8 +126,18 @@ func (s *Service) login(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.log.InfoContext(r.Context(), "player session issued", "player_id", player.ID, "created", created)
-	return LoginResponse{Player: player, SessionToken: "dev-player-" + player.ID}, nil
+	token := "dev-player-" + player.ID
+	if s.minter != nil {
+		minted, err := s.minter(player.ID)
+		if err != nil {
+			return nil, apierr.Internal("could not mint a player token").WithCause(err)
+		}
+		token = minted
+	}
+
+	s.log.InfoContext(r.Context(), "player session issued", "player_id", player.ID, "created", created,
+		"signed", s.minter != nil)
+	return LoginResponse{Player: player, SessionToken: token}, nil
 }
 
 func (s *Service) getPlayer(r *http.Request) (any, error) {

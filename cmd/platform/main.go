@@ -39,6 +39,8 @@ func run() error {
 		ServiceToken:      cfg.ServiceToken,
 		JWTKey:            cfg.JWTKey,
 		JWTIssuer:         cfg.JWTIssuer,
+		PlayerTokenTTL:    cfg.PlayerTokenTTL,
+		PlayerJWTKey:      cfg.PlayerJWTKey,
 		Allocator:         cfg.Allocator,
 		EdgegapToken:      cfg.EdgegapToken,
 		EdgegapApp:        cfg.EdgegapApp,

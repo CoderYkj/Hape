@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,11 +36,16 @@ func TestJWTModeIsUsableEndToEnd(t *testing.T) {
 	server := httptest.NewServer(app.Handler())
 	t.Cleanup(server.Close)
 
-	// Login is a public op: the Nakama plugin exchanges a verified identity for a
-	// backend player. (KNOWN GAP: it trusts the external_id in the body - see
-	// README "known gaps" - so this step is only safe behind the plugin today.)
-	status, body := doJSON(t, server.URL, http.MethodPost, "/v1/account/sessions",
+	// Login is a service-only exchange (ADR 0010): anonymous callers cannot mint a
+	// token for an arbitrary identity any more.
+	status, _ := doJSON(t, server.URL, http.MethodPost, "/v1/account/sessions",
 		map[string]any{"external_id": "nakama-user-9"}, "")
+	if status != http.StatusUnauthorized {
+		t.Fatalf("anonymous login = %d, want 401", status)
+	}
+
+	status, body := doJSON(t, server.URL, http.MethodPost, "/v1/account/sessions",
+		map[string]any{"external_id": "nakama-user-9"}, "service-secret")
 	if status != http.StatusOK {
 		t.Fatalf("login status = %d (%v)", status, body)
 	}
@@ -60,9 +66,16 @@ func TestJWTModeIsUsableEndToEnd(t *testing.T) {
 		return signed
 	}
 
-	// A valid token gets the player's own profile.
-	status, body = doJSON(t, server.URL, http.MethodGet, "/v1/account/players/"+playerID, nil,
-		token("nakama-user-9", []byte(key), time.Hour))
+	// The token login handed back is a signed JWT this backend accepts (iss=gamebackend),
+	// so the client gets a credential that works outside dev too.
+	sessionToken, _ := body["session_token"].(string)
+	if sessionToken == "" {
+		t.Fatalf("login returned no session token: %v", body)
+	}
+	if !strings.HasPrefix(sessionToken, "eyJ") {
+		t.Fatalf("production login returned %q, want a JWT", sessionToken)
+	}
+	status, body = doJSON(t, server.URL, http.MethodGet, "/v1/account/players/"+playerID, nil, sessionToken)
 	if status != http.StatusOK {
 		t.Fatalf("authenticated read = %d (%v)", status, body)
 	}

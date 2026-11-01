@@ -82,9 +82,9 @@ Authorization: Bearer <Nakama JWT>
 `external_id`。也就是说：任何能访问后端的人都能声称自己是任意 Nakama 用户，拿到
 那个玩家的后端 id 与 token。
 
-正确做法是新增一个"用 JWT 换后端身份"的 op（`AuthPlayer`，身份取自 token 而非
-body），把现在这个标记为 dev-only。**这会改变一个 op 的认证级别**，按
-`10-workflow.md` 属于"必须停下来问"的契约变更，所以沒有在本篇里顺手改。
+**已关闭（ADR 0010 / spec 0011）**：登录改为服务专属（`AuthService`），客户端无法再
+调用；生产模式的 token 由后端签发（`iss=gamebackend`），因此"客户端拿不到可用 token"
+这个更严重的问题也一并解决。客户端现在只从 RPC 拿 token。
 
 ## 7. 回滚
 

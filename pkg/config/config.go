@@ -22,16 +22,19 @@ type Config struct {
 	DevAuth      bool
 	ServiceToken string
 	JWTKey       string // Nakama session encryption key; required when DevAuth is off
+	PlayerJWTKey string // optional: separate key for backend-issued player tokens
 	JWTIssuer    string // optional `iss` check
-	Allocator    string // local | gamelift | edgegap | agones
-	EdgegapToken string
-	EdgegapApp   string
-	EdgegapVer   string
-	EdgegapURL   string
-	EdgegapLat   float64
-	EdgegapLon   float64
-	DatabaseURL  string // empty in v0: stores are in memory
-	BatchRegions []string
+	// PlayerTokenTTL is how long a backend-issued player token lives.
+	PlayerTokenTTL time.Duration
+	Allocator      string // local | gamelift | edgegap | agones
+	EdgegapToken   string
+	EdgegapApp     string
+	EdgegapVer     string
+	EdgegapURL     string
+	EdgegapLat     float64
+	EdgegapLon     float64
+	DatabaseURL    string // empty in v0: stores are in memory
+	BatchRegions   []string
 
 	// ReconcileInterval is how often the stale-session sweep runs. Zero (the
 	// default) disables it: a single-process dev server does not need a timer,
@@ -45,6 +48,10 @@ type Config struct {
 // Load reads the environment for one process. A malformed value is an error, not
 // a silent fallback: a typo in a duration must not quietly disable the sweep.
 func Load(service, defaultAddr string) (Config, error) {
+	playerTokenTTL, err := duration("BACKEND_PLAYER_TOKEN_TTL", time.Hour)
+	if err != nil {
+		return Config{}, err
+	}
 	reconcile, err := duration("BACKEND_RECONCILE_INTERVAL", 0)
 	if err != nil {
 		return Config{}, err
@@ -61,12 +68,14 @@ func Load(service, defaultAddr string) (Config, error) {
 		DevAuth:           envOr("BACKEND_DEV_AUTH", "true") == "true",
 		ServiceToken:      os.Getenv("BACKEND_SERVICE_TOKEN"),
 		JWTKey:            os.Getenv("BACKEND_JWT_KEY"),
+		PlayerJWTKey:      os.Getenv("BACKEND_PLAYER_JWT_KEY"),
 		JWTIssuer:         os.Getenv("BACKEND_JWT_ISSUER"),
 		Allocator:         envOr("BACKEND_ALLOCATOR", "local"),
 		EdgegapToken:      os.Getenv("BACKEND_EDGEGAP_TOKEN"),
 		EdgegapApp:        envOr("BACKEND_EDGEGAP_APP", ""),
 		EdgegapVer:        os.Getenv("BACKEND_EDGEGAP_VERSION"),
 		EdgegapURL:        os.Getenv("BACKEND_EDGEGAP_BASE_URL"),
+		PlayerTokenTTL:    playerTokenTTL,
 		EdgegapLat:        floatOr("BACKEND_EDGEGAP_LATITUDE", 0),
 		EdgegapLon:        floatOr("BACKEND_EDGEGAP_LONGITUDE", 0),
 		DatabaseURL:       os.Getenv("BACKEND_DATABASE_URL"),

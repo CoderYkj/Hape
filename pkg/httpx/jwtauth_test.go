@@ -119,7 +119,7 @@ func TestJWTAuthRejectsBadTokens(t *testing.T) {
 	// this must fail on the signature, not on the header.
 	tampered := sign(t, testKey, nil)
 	parts := strings.Split(tampered, ".")
-	tamperedPayload := base64.RawURLEncoding.EncodeToString([]byte(`{"uid":"attacker","exp":9999999999}`))
+	tamperedPayload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"nakama","uid":"attacker","exp":9999999999}`))
 	tampered = parts[0] + "." + tamperedPayload + "." + parts[2]
 
 	cases := map[string]struct {
@@ -227,5 +227,100 @@ func TestJWTAuthRejectsIncompleteConfiguration(t *testing.T) {
 	}
 	if _, err := httpx.NewJWTAuth(httpx.JWTAuthConfig{SecurityKey: testKey, ServiceToken: "s"}); err == nil {
 		t.Fatal("missing resolver must be refused")
+	}
+}
+
+// TestPlayerTokensAreAcceptedWithoutAResolver covers the second issuer: a token this
+// backend signed (iss=gamebackend) already carries the backend player id, so verifying
+// it must not touch the identity resolver - and must not accept a Nakama-signed token
+// that claims to be one.
+func TestPlayerTokensAreAcceptedWithoutAResolver(t *testing.T) {
+	resolverCalls := 0
+	auth, err := httpx.NewJWTAuth(httpx.JWTAuthConfig{
+		SecurityKey:  testKey,
+		PlayerKey:    testKey,
+		ServiceToken: "service-secret",
+		Resolve: func(context.Context, string) (string, error) {
+			resolverCalls++
+			return "p_resolved", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewJWTAuth: %v", err)
+	}
+
+	issuer, err := httpx.NewTokenIssuer(testKey, time.Hour)
+	if err != nil {
+		t.Fatalf("NewTokenIssuer: %v", err)
+	}
+	token, expires, err := issuer.Issue("p_123")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if !expires.After(time.Now()) {
+		t.Fatalf("expiry %v is not in the future", expires)
+	}
+
+	principal, err := auth.Player(request(token))
+	if err != nil {
+		t.Fatalf("Player with a backend-issued token: %v", err)
+	}
+	if principal.PlayerID != "p_123" {
+		t.Fatalf("PlayerID = %q, want the token's subject", principal.PlayerID)
+	}
+	if resolverCalls != 0 {
+		t.Fatalf("the resolver ran %d times for a backend token; it must not run at all", resolverCalls)
+	}
+
+	// A token signed by the wrong key, even with the right issuer, is rejected.
+	wrong, err := httpx.NewTokenIssuer([]byte("not-the-key"), time.Hour)
+	if err != nil {
+		t.Fatalf("NewTokenIssuer: %v", err)
+	}
+	badToken, _, err := wrong.Issue("p_999")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if _, err := auth.Player(request(badToken)); code(err) != apierr.CodeUnauthenticated {
+		t.Fatalf("forged player token: code = %q, want unauthenticated", code(err))
+	}
+
+	// An unknown issuer is refused outright.
+	unknown := sign(t, testKey, map[string]any{"iss": "someone-else", "sub": "p_1"})
+	if _, err := auth.Player(request(unknown)); code(err) != apierr.CodeUnauthenticated {
+		t.Fatalf("unknown issuer: code = %q, want unauthenticated", code(err))
+	}
+
+	// An expired player token is refused like any other.
+	expiredIssuer, err := httpx.NewTokenIssuer(testKey, time.Nanosecond)
+	if err != nil {
+		t.Fatalf("NewTokenIssuer: %v", err)
+	}
+	expired, _, err := expiredIssuer.Issue("p_123")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	// The default verifier tolerates 60s of clock skew, so expiry needs a strict one.
+	strict := newAuth(t, httpx.JWTAuthConfig{Leeway: time.Millisecond})
+	_, err = strict.Player(request(expired))
+	if err == nil {
+		t.Fatal("an expired player token was accepted")
+	}
+	if code(err) != apierr.CodeUnauthenticated {
+		t.Fatalf("expired player token: code = %q, want unauthenticated", code(err))
+	}
+}
+
+func TestTokenIssuerRequiresAKey(t *testing.T) {
+	if _, err := httpx.NewTokenIssuer(nil, time.Hour); err == nil {
+		t.Fatal("an empty key must be refused")
+	}
+	issuer, err := httpx.NewTokenIssuer(testKey, 0)
+	if err != nil {
+		t.Fatalf("a zero TTL should default, not fail: %v", err)
+	}
+	if _, _, err := issuer.Issue(""); err == nil {
+		t.Fatal("issuing for an empty player id must be refused")
 	}
 }

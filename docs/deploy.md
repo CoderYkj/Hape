@@ -100,6 +100,8 @@ BACKEND_BASE_URL=http://backend:8080 \
 | `BACKEND_SERVICE_TOKEN` | 空 | 服务间 token；关闭 dev auth 时必填（服务调用仍用它，不用 JWT） |
 | `BACKEND_JWT_KEY` | 空 | Nakama 的 session 加密密钥（HS256）；`BACKEND_DEV_AUTH=false` 时必填 |
 | `BACKEND_JWT_ISSUER` | 空 | 非空时校验 token 的 `iss`（Nakama 默认发 `nakama`） |
+| `BACKEND_PLAYER_JWT_KEY` | 空 | 可选：给后端签发的玩家 token 单独一把密钥；空 = 复用 `BACKEND_JWT_KEY` |
+| `BACKEND_PLAYER_TOKEN_TTL` | `1h` | 后端玩家 token 的有效期；过期后客户端重放 RPC 换取 |
 | `BACKEND_ALLOCATOR` | `local` | `local` / `edgegap`（已实现）/ `gamelift`、`agones`（仍是桩） |
 | `BACKEND_EDGEGAP_TOKEN` | 空 | Edgegap API token；`BACKEND_ALLOCATOR=edgegap` 时必填 |
 | `BACKEND_EDGEGAP_APP` | 空 | 应用名（当前 `Hape`） |

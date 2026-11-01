@@ -120,6 +120,11 @@
         "tags": [
           "account"
         ],
+        "security": [
+          {
+            "serviceToken": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -153,7 +158,7 @@
           }
         },
         "x-idempotent": true,
-        "x-note": "Idempotent by external_id: the same Nakama user always maps to the same player."
+        "x-note": "Service-only on purpose (ADR 0010): the body carries an external identity, so only the Nakama plugin may call this. A client that could call it could claim to be any user and receive that player's token."
       }
     }
   },
@@ -221,7 +226,7 @@
             "$ref": "#/components/schemas/Player"
           },
           "session_token": {
-            "description": "Player token for subsequent calls. Dev builds return dev-player-\u003cid\u003e; production returns a signed JWT.",
+            "description": "Player token for subsequent calls: dev-player-\u003cid\u003e with dev auth, a signed JWT (iss=gamebackend) otherwise.",
             "type": "string"
           }
         },
