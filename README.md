@@ -204,7 +204,7 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 | 项 | 为什么现在不做 | 什么信号触发它 | 到时的做法 |
 |---|---|---|---|
 | Edgegap 侧 `env_vars` 复验 | 容器内注入已由 `ds/` + CI `ds` job 验证（spec 0012），但那是本地/CI 的容器；Edgegap 是否把 `env_vars` 真的放进实例环境，需要一个指向自有镜像的 app version 才能看 | 首次真实联调 / 第一次用自有镜像在 Edgegap 分配 | 把 `:<sha>-ds` 镜像在 Edgegap 建 app version，分配一次，看 container logs 里那行 banner |
-| 真实厂商的回收时序复验 | 回读逻辑已实现（spec 0015）：`Release` = 停止请求 + `GET /status` 确认，未确认则记录并由 reconciler 重试；假厂商覆盖了全部分支，但真实 Edgegap 的 `current_status` 时序仍需一次真实释放确认 | 首次真实计费对账 / M2 收尾 | 分配一次 → 释放 → 日志里看到 `pending release confirmed` 或 `release retry failed` 的 attempts 收敛到 0，再核对 deployments 计数 |
+| 计费对账（不是回收） | 回收**已实测**（spec 0015，2026-11-01）：分配 4s 就绪、释放 `running=false` 用时 2.0s/0.7s、序列 `Status.READY → Status.TERMINATING`、之后 deployments 归零。仍未验证的是 `TERMINATING` 窗口内是否还有秒级计费 | 首次真实计费对账 / M2 收尾 | 用厂商账单 API 或控制台对账一次「释放时刻 vs 计费停止时刻」 |
 | `account.login` 换身份 op | 见上一节的理由 | 后端对不可信客户端开放 / 客户端直连换 token / 上线前安全评审 | 新增 `AuthPlayer` 的换身份 op，旧 op 标 dev-only（spec 0006 §6） |
 | GameLift / Agones 适配器 | 一家够用；三家的适配器结构差异大 | 选定第二家厂商 / 多地合规要求 | 照 `pkg/battlealloc/edgegap.go` 的结构写，契约测试用假服务 |
 

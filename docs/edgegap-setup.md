@@ -35,6 +35,32 @@ released; nothing should be billing for this deployment
 触发条件：首次真实联调 / 第一次用我们自己的镜像分配。样例镜像（UE5 Lyra）不会打印，
 所以在那之前 Edgegap 侧仍然只验到"API 接受了 env_vars"。
 
+## 回收时序（已实测，2026-11-01）
+
+`tools/edgegap-check` 走生产适配器（`pkg/battlealloc.Edgegap`）分配一台实例、立刻释放，
+并**并行采样** `GET /v1/status/{id}` 记录厂商真实返回：
+
+```text
+allocating Hape/demo-app-lyra for session smoke-1793545108
+READY in 4s: id=2fd6d5655d63 address=172.237.14.252:32511
+releasing 2fd6d5655d63 ...
+status sequence over 2.01s: Status.READY -> Status.TERMINATING
+CONFIRMED released in 2s: last observed status="Status.TERMINATING" running=false
+```
+
+两次结果一致（释放耗时 2.0s / 0.7s），释放后 `GET /v1/deployments` 的 `total_count` 归零。
+
+三条要点：
+
+1. **判定看 `running`，不要看状态字符串**：`running` 变 false 时 `current_status`
+   还停在 `Status.TERMINATING`。等字面量 `TERMINATED` 只是多一个超时竞态，不多一分真相。
+2. **真实取值带 `Status.` 前缀**（`Status.READY` / `Status.TERMINATING`），写死字符串判断
+   的人会踩到。
+3. 释放是**亚秒到数秒**量级，所以 30s 的回读预算绰绰有余，15 分钟仍未确认基本就是卡住。
+
+`Status.TERMINATING` 窗口内是否仍有秒级计费**未验证**：代码确认的是"不在运行"，
+不是"不再计费"；后者要靠账单对账。
+
 ## 0. 为什么是 Edgegap
 
 三家托管厂商里，GameLift 要先建 fleet、Agones 要先有 K8s 集群，而 Edgegap 是

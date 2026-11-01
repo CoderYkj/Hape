@@ -332,7 +332,10 @@ BACKEND_SERVICE_CREDENTIALS="nakama=<old>,nakama-v2=<new>"
 1. `backend_release_max_attempts` — 多少次了；
 2. 后端日志 grep `release retry failed`，拿 `allocation_id`；
 3. 去厂商控制台查这个 deployment 的真实状态；必要时手工 `DELETE /v1/stop/{id}`；
-4. 若厂商侧已终止而本地仍 pending，说明回读的判定有问题，先看 `current_status` 的具体取值。
+4. 若厂商侧已终止而本地仍 pending，先看 `current_status` 的具体取值。实测（2026-11-01）
+   真实取值带 `Status.` 前缀：`Status.READY -> Status.TERMINATING`，且 `running` 在状态
+   仍是 `TERMINATING` 时就变 false——判定必须看 `running`，等字符串 `TERMINATED` 会多一个
+   超时竞态。
 
 验证方式（不需要真的厂商）：单测 `TestReconcileOncePublishesTheReleaseBacklog` 用一个
 "永远不释放"的假分配器跑完整链路——战报仍 200、会话进 pending、gauge 变 1、恢复后 gauge

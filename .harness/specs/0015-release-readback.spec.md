@@ -101,9 +101,16 @@ reconciler tick：先 ExpireStale，再 RetryReleases（每轮最多 25 条）
 
 ## 7. 未决
 
-- [ ] **真机复验**：本机/CI 用假厂商覆盖了全部分支；真实 Edgegap 的 `current_status`
-  取值集合（`TERMINATED`/`STOPPING`/…）与 `running` 时序仍需一次真实释放来确认
-  （plan 只有 1 个并发部署槽，手工做一次即可）。
+- [x] **真机复验（2026-11-01，两次）**：`tools/edgegap-check`（走生产适配器 + 并行状态采样）
+  在真实 Edgegap 上实测：
+  - 分配 → `READY`：**4s**（两次一致），地址形如 `172.237.14.252:32511`；
+  - 释放 → `running=false`：**2.0s / 0.7s**（采样 1s / 300ms）；
+  - 状态序列：`Status.READY -> Status.TERMINATING`，且 **`running` 在 `current_status`
+    仍是 `Status.TERMINATING` 时就变 false**——所以判定必须看 `running`，不能等字符串
+    `TERMINATED`（本 spec §3 的实现正是如此，这次实测确认它不是碰巧对）；
+  - 释放后 `/v1/deployments` 的 `total_count` 归零，没有残留。
+  - 仍未覆盖：`Status.TERMINATING` 窗口内是否仍有秒级计费。我们确认的是"不在运行"，
+    不是"不再计费"；账单对账仍在 §9 的未决里。
 - [ ] **告警**：`release_attempts` 目前只有日志。接指标后应有一条
   "同一 session 的 attempts 持续增长" 的规则（spec 0014 §9 也提到缺告警指标）。
 - [ ] 多实例 reconciler 的单活选主（现在多实例会重复调用 Release，安全但浪费配额）。

@@ -256,6 +256,11 @@ func (e *Edgegap) stop(ctx context.Context, allocationID string) error {
 // waitStopped is the read-back that turns "the provider accepted a stop request" into
 // "the instance is not running".
 //
+// The decision is on `running`, not on `current_status`, and that is measured rather than
+// assumed: a live probe on 2026-11-01 saw `Status.READY -> Status.TERMINATING` with
+// running=false from the first TERMINATING sample, i.e. the status string lags the fact.
+// Waiting for a literal "TERMINATED" would add a deadline race for no extra truth.
+//
 // It returns ErrRetryable when the budget runs out with the instance still up: the
 // caller records that and tries again, because an instance nobody confirmed stopped is
 // a recurring charge, not an eventual inconsistency.

@@ -192,7 +192,7 @@ BACKEND_ALLOCATOR=gamelift go run ./cmd/platform
 | 项 | 现状 | 需要做什么 |
 |---|---|---|
 | DS ↔ 后端认证 | 双凭证：service token（进程）+ 每场 `X-Session-Token`（会话） | 凭证轮换 / mTLS；真机确认 Edgegap 注入生效 |
-| 会话回收 | 已接：结束 + 超时两条路径；回收带状态回读，未确认的进 `release_pending` 并由 reconciler 重试（spec 0015） | 真实厂商的时序复验；`release_attempts` 增长接告警 |
+| 会话回收 | 已接：结束 + 超时两条路径；回收带状态回读（判定看 `running`），未确认的进 `release_pending` 并由 reconciler 重试；真实 Edgegap 时序已实测（4s 就绪、~2s 释放、`running` 先于 `current_status` 翻转） | 指标已接（`backend_release_*`）+ 一条 15 分钟告警；余下是计费对账 |
 | 僵尸会话对账 | 已接：平台内定时器，opt-in | 多实例部署时的单活选主；`in_progress` 的时长上限 |
 | 玩家进入事件 | ready 直接可结算 | DS 上报 `in_progress` |
 | 掉线重连 | 未设计 | 需要 session 保存玩家连接状态 |
