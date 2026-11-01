@@ -1,0 +1,81 @@
+# Production stack for a single host (the target for a small team; k8s is deferred).
+#
+# Differences from deploy/docker-compose.yml, and why:
+#   - the backend image is a released tag, never built here: what runs in production
+#     must be the artifact CI built and pushed, not something rebuilt on the host
+#   - every secret comes from the environment with `${VAR:?}` so a missing value is a
+#     startup failure instead of a silently degraded service
+#   - BACKEND_ENV=prod, so the platform refuses to start with dev auth (see pkg/config)
+#   - postgres publishes no host port: only the backend needs it
+#   - containers are read-only where possible (the app writes nothing but /tmp)
+#
+# Usage (see docs/deploy.md for the full runbook):
+#   set -a; . /etc/gamebackend/backend.env; set +a
+#   docker compose -f deploy/docker-compose.prod.yml up -d
+
+name: gamebackend-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB (e.g. nakama)}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+    security_opt:
+      - no-new-privileges:true
+
+  backend:
+    image: ${BACKEND_IMAGE:?set BACKEND_IMAGE to the released tag, e.g. ghcr.io/org/hape:sha}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      BACKEND_ENV: prod
+      BACKEND_ADDR: 0.0.0.0:8080
+      BACKEND_DEV_AUTH: "false"
+      BACKEND_SERVICE_TOKEN: ${BACKEND_SERVICE_TOKEN:?set BACKEND_SERVICE_TOKEN}
+      BACKEND_JWT_KEY: ${BACKEND_JWT_KEY:?set BACKEND_JWT_KEY (Nakama session encryption key)}
+      BACKEND_JWT_ISSUER: ${BACKEND_JWT_ISSUER:-nakama}
+      BACKEND_DATABASE_URL: ${BACKEND_DATABASE_URL:?set BACKEND_DATABASE_URL (postgres://...)}
+      BACKEND_ALLOCATOR: ${BACKEND_ALLOCATOR:-edgegap}
+      BACKEND_EDGEGAP_TOKEN: ${BACKEND_EDGEGAP_TOKEN:?set BACKEND_EDGEGAP_TOKEN for the edgegap allocator}
+      BACKEND_EDGEGAP_APP: ${BACKEND_EDGEGAP_APP:?set BACKEND_EDGEGAP_APP}
+      BACKEND_EDGEGAP_VERSION: ${BACKEND_EDGEGAP_VERSION:-}
+      BACKEND_EDGEGAP_LATITUDE: ${BACKEND_EDGEGAP_LATITUDE:-0}
+      BACKEND_EDGEGAP_LONGITUDE: ${BACKEND_EDGEGAP_LONGITUDE:-0}
+      BACKEND_RECONCILE_INTERVAL: ${BACKEND_RECONCILE_INTERVAL:-30s}
+      BACKEND_SESSION_STALE_AFTER: ${BACKEND_SESSION_STALE_AFTER:-5m}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      # Bound to loopback: a reverse proxy terminates TLS and faces the internet.
+      - "127.0.0.1:8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+volumes:
+  pgdata:

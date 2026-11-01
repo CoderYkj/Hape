@@ -334,3 +334,131 @@ jobs:
       - name: tear down
         if: always()
         run: docker compose -f deploy/docker-compose.yml down -v
+
+  # Operations, not code: the deploy step is a script and a compose file, so it is
+  # exercised the same way. Everything here runs against a throwaway database.
+  ops:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: gamebackend
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/gamebackend?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: apply migrations
+        run: sh scripts/db-migrate.sh
+
+      - name: a second run is a no-op
+        run: |
+          out="$(sh scripts/db-migrate.sh)"
+          echo "$out"
+          echo "$out" | grep -q '0 applied'
+
+      # The append-only rule is a claim until something tries to break it.
+      - name: editing an applied migration is refused
+        run: |
+          mkdir -p /tmp/migs
+          cp db/migrations/*.sql /tmp/migs/
+          printf '\n-- tampered\n' >> /tmp/migs/0001_init.sql
+          if MIGRATIONS_DIR=/tmp/migs sh scripts/db-migrate.sh; then
+            echo "::error title=append-only guard::an edited migration was accepted"
+            exit 1
+          fi
+          MIGRATIONS_DIR=/tmp/migs sh scripts/db-migrate.sh 2>&1 | grep -q 'append-only'
+
+      - name: a backup survives losing the data
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO players (id, external_id, display_name) VALUES ('p_backup','ext-backup','Backup')"
+          sh scripts/db-backup.sh /tmp/ops.dump
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DELETE FROM players WHERE id = 'p_backup'"
+          count="$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM players")"
+          echo "rows after deletion: $count"
+
+      - name: restoring brings the data back
+        run: |
+          RESTORE_CONFIRM=yes sh scripts/db-restore.sh /tmp/ops.dump
+          count="$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM players WHERE id = 'p_backup'")"
+          echo "marker rows after restore: $count"
+          test "$count" = "1"
+
+      - name: restoring without confirmation is refused
+        run: |
+          if sh scripts/db-restore.sh /tmp/ops.dump; then
+            echo "::error title=restore guard::a restore ran without RESTORE_CONFIRM=yes"
+            exit 1
+          fi
+
+      # A production compose file that starts with missing secrets is worse than one
+      # that refuses to parse, so the `${VAR:?}` guards are asserted too.
+      - name: the production compose file refuses to start without secrets
+        run: |
+          if docker compose -f deploy/docker-compose.prod.yml config -q >/dev/null 2>&1; then
+            echo "::error title=prod compose::started without required secrets"
+            exit 1
+          fi
+          echo "missing secrets are rejected"
+
+      - name: the production compose file validates with the example env
+        run: docker compose -f deploy/docker-compose.prod.yml --env-file deploy/systemd/backend.env.example config -q
+
+      - name: the systemd unit is syntactically valid
+        run: systemd-analyze verify deploy/systemd/gamebackend.service
+
+  # Publishing the artifact. What runs in production has to be the thing CI built and
+  # pushed, so the tag is the commit sha and the job pulls it back to prove it is
+  # servable.
+  release:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build the image
+        run: docker build -t hape:release .
+
+      - name: push to the registry with the commit sha as the tag
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA:0:12}"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin || {
+            echo "::error title=registry login::ghcr.io rejected GITHUB_TOKEN (repository may need packages write permission)"
+            exit 1
+          }
+          docker tag hape:release "$image"
+          docker push "$image" || {
+            echo "::error title=registry push::could not push $image (check workflow permissions: packages write)"
+            exit 1
+          }
+
+      - name: the pushed image actually runs
+        run: |
+          docker pull "$IMAGE"
+          docker run -d --rm --name hape-release -p 8080:8080 "$IMAGE"
+          ok=no
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8080/healthz; then ok=yes; break; fi
+            sleep 1
+          done
+          docker stop hape-release
+          if [ "$ok" != yes ]; then
+            echo "::error title=released image::the published artifact never became healthy"
+            exit 1
+          fi
+          echo "::notice title=released image::$IMAGE"

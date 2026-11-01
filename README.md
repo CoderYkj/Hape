@@ -74,7 +74,7 @@ api/openapi/    生成的接口契约（勿手改）
 db/migrations/  Postgres schema（0001+0002，已在 16.4 上执行；7 个域已接线）
 db/probes/      schema 约束的断言脚本（35 条，psql 可重跑）
 nakama/         Nakama Go 模块（RPC 桥接，未验证）
-deploy/         docker-compose：postgres + backend + nakama（未验证）
+deploy/         dev compose + 生产 compose（prod 用占位密钥拒绝启动）+ systemd 单元
 Dockerfile      多阶段构建，alpine + 非 root 静态二进制（未验证）
 .dockerignore   构建上下文收敛到 Go 源码（刻意不含 .git）
 docs/           架构、契约、UE5 对接、本地运行手册、部署手册、Edgegap 接入指引
@@ -99,8 +99,9 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 
 **未验证**（本机缺 docker / buf / make，且未接真实厂商）：
 
-- `docs/deploy.md` 里的生产发布流程：镜像是 CI 验过的，但**没有部署目标**
-  （没有 registry 之外的 k8s/systemd 清单，也从未部署到任何服务器）
+- **从未部署到任何服务器**：生产形态（单机 compose + systemd）、发布（ghcr + sha tag）、
+  迁移脚本、备份/恢复脚本都已就位并由 CI 验证（`ops` / `release` job），但
+  **没有真机器跑过**：systemd 启停、TLS 反代、磁盘水位、跨机器恢复都未验证
 - Nakama 插件只验到"能编译成 `.so`"：**没有真的加载进 Nakama 跑过一次登录**
 - **没有生产数据库**：schema 只在本地实例与 CI 的临时容器上跑过，没有备份、
   复制、连接池调优与密码策略（`docs/postgres-local.md` 的"未验证/未做"一节）

@@ -177,3 +177,79 @@ M0 没有可部署目标，所以这一步是模板，不是已验证的流水�
    runner 或部署步骤，且要与 SQL store 同批上线）
 4. compose 里后端的数据库接线（建库 init 脚本 + `BACKEND_DATABASE_URL`），见第 4 节注意
 5. Kubernetes / 单机 systemd 的清单：现在只有 compose，没有生产编排
+## 11. 生产目标（单机 compose + systemd）
+
+小团队的上线形态是**一台机器 + compose + systemd**；k8s 清单不在本轮范围。
+目标是"跑的是 CI 产出的镜像，而不是宿主上重新构建的东西"。
+
+### 11.1 拓扑
+
+```text
+互联网 → 反向代理（TLS） → 127.0.0.1:8080 backend ── compose 内网 ── postgres
+                                                                  └─ 数据卷 pgdata
+```
+
+- `deploy/docker-compose.prod.yml`：`BACKEND_ENV=prod`（拒绝 dev auth）、
+  `read_only` + `tmpfs /tmp`、`no-new-privileges`、日志轮转、postgres **不发布宿主端口**。
+- 所有密钥用 `${VAR:?}` 声明：**缺一个就启动失败**，而不是带着空密钥跑起来。
+- `deploy/systemd/gamebackend.service` 负责随主机启停 compose；
+  密钥放在 `/etc/gamebackend/backend.env`（root 0600，模板见 `backend.env.example`）。
+
+### 11.2 发布
+
+```bash
+# CI（release job）已经构建并推送：
+#   ghcr.io/<owner>/hape:<git-sha 前 12 位>
+# 主机上只做拉取与重启：
+set -a; . /etc/gamebackend/backend.env; set +a
+export BACKEND_IMAGE=ghcr.io/<owner>/hape:<sha>
+docker compose -f deploy/docker-compose.prod.yml pull
+docker compose -f deploy/docker-compose.prod.yml up -d
+curl -fsS http://127.0.0.1:8080/healthz
+```
+
+镜像 tag 用 **git sha**，不用 `latest`：回滚就是把 `BACKEND_IMAGE` 换成上一个 sha 再 `up -d`。
+
+### 11.3 迁移
+
+```bash
+DATABASE_URL='postgres://gamebackend:...@127.0.0.1:5432/gamebackend' sh scripts/db-migrate.sh
+```
+
+- 每个文件记录 **sha256**；重复执行是 no-op；
+- **改一个已应用的迁移会被拒绝**（append-only）——这是脚本里的硬校验，不是约定；
+- 迁移先于新镜像上线执行：新代码兼容旧 schema，旧代码不兼容新 schema 的部分要单独一次发布。
+
+### 11.4 备份与恢复演练
+
+```bash
+DATABASE_URL=... sh scripts/db-backup.sh /var/backups/gamebackend-$(date +%F).dump
+RESTORE_CONFIRM=yes DATABASE_URL=... sh scripts/db-restore.sh /var/backups/gamebackend-2026-01-01.dump
+```
+
+- 备份是 `pg_dump --format=custom`，写临时文件后 `mv`，**半截备份不会冒充完整备份**
+  （小于 512 字节直接判失败）；
+- 恢复必须显式 `RESTORE_CONFIRM=yes`：这个命令在凌晨三点跑在错误的库上是真实的故障模式；
+- 备份只是备份：**没演练过的恢复不算备份**。CI 的 `ops` job 每次 push 都做一次
+  "写入 → 备份 → 删除 → 恢复 → 断言行回来了"。
+
+### 11.5 回滚
+
+1. 镜像回滚：`BACKEND_IMAGE=<上一个 sha>` + `up -d`（无数据迁移时最安全）。
+2. 迁移回滚：**不支持向下迁移**。破坏性 schema 变更必须单独发布，先双写/回填再删列。
+3. 数据回滚：用备份 + `db-restore.sh`，且先确认备份里的 schema 与目标镜像兼容。
+
+### 11.6 这一节里哪些是 CI 验证过的
+
+| 项 | 验证方式 |
+|---|---|
+| 迁移幂等 + append-only 校验 | `ops` job：跑两次断言 0 applied；篡改副本断言被拒 |
+| 备份/恢复可用 | `ops` job：写入 → 备份 → 删除 → 恢复 → 断言行回来 |
+| 恢复需要确认 | `ops` job：不带 `RESTORE_CONFIRM` 断言失败 |
+| 生产 compose 缺密钥会失败 | `ops` job：无环境变量时 `config -q` 必须失败 |
+| 生产 compose 结构合法 | `ops` job：`--env-file backend.env.example config -q` |
+| systemd 单元语法 | `ops` job：`systemd-analyze verify` |
+| 发布镜像可运行 | `release` job：build → 推 ghcr（sha tag）→ 拉回 → 跑起来探活 |
+
+**没有 CI 覆盖的部分**：真正的目标主机（systemd 启停、TLS 反代、磁盘与内存水位）、
+镜像仓库的保留策略、跨机器恢复。这些需要一台真机器，见 README 的"未验证"清单。

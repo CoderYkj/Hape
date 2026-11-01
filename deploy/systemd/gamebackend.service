@@ -1,0 +1,28 @@
+# systemd unit for the single-host target: brings the compose stack up and keeps it
+# tied to the host lifecycle. Not verified on a real host - `systemd-analyze verify`
+# checks the unit's syntax in CI, and docs/deploy.md is the runbook.
+#
+#   install  cp deploy/systemd/gamebackend.service /etc/systemd/system/
+#            cp deploy/systemd/backend.env.example /etc/gamebackend/backend.env
+#            systemctl daemon-reload && systemctl enable --now gamebackend
+[Unit]
+Description=gamebackend platform (docker compose stack)
+Documentation=file:///opt/gamebackend/docs/deploy.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/gamebackend
+# Secrets live here, root-owned, 0600. The unit does not carry them.
+EnvironmentFile=/etc/gamebackend/backend.env
+ExecStart=/usr/bin/docker compose -f deploy/docker-compose.prod.yml up -d
+ExecStop=/usr/bin/docker compose -f deploy/docker-compose.prod.yml down
+# Compose pulls images; give it time on a cold host.
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
