@@ -1,6 +1,7 @@
 # build output
 /bin/
 /dist/
+# Nakama plugin output (built in CI, mounted into the stack)\n/nakama/build/
 *.exe
 *.test
 *.out

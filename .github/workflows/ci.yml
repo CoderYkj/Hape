@@ -213,3 +213,97 @@ jobs:
           go build -buildmode=plugin -o /tmp/gamemodule.so .
           test -s /tmp/gamemodule.so
           ls -l /tmp/gamemodule.so
+
+  # The last unproven piece of the login path: a real Nakama instance loading the Go
+  # plugin and calling the backend. Needs Docker (for Nakama) and therefore cannot be
+  # run on the development machine - which is exactly why it lives here.
+  nakama:
+    runs-on: ubuntu-latest
+    env:
+      # The plugin reaches the backend by compose service name, not localhost.
+      BACKEND_BASE_URL: http://backend:8080
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: nakama/modules/go.mod
+          cache-dependency-path: nakama/modules/go.sum
+
+      - name: build the plugin
+        working-directory: nakama/modules
+        run: |
+          mkdir -p ../build
+          go build -buildmode=plugin -o ../build/gamemodule.so .
+          ls -l ../build/gamemodule.so
+
+      - name: start the stack
+        run: docker compose -f deploy/docker-compose.yml up -d --build postgres backend nakama
+
+      - name: wait for the backend
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/healthz; then exit 0; fi
+            sleep 2
+          done
+          echo "backend never became healthy"
+          exit 1
+
+      - name: apply migrations
+        run: |
+          for f in db/migrations/*.sql; do
+            echo "applying $f"
+            docker compose -f deploy/docker-compose.yml exec -T postgres \
+              psql -U gamebackend -d gamebackend -v ON_ERROR_STOP=1 < "$f"
+          done
+
+      - name: wait for Nakama
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:7350/healthcheck; then exit 0; fi
+            sleep 2
+          done
+          echo "nakama never became healthy"
+          docker compose -f deploy/docker-compose.yml logs nakama
+          exit 1
+
+      # A plugin that fails to load leaves Nakama healthy but without the RPC, which
+      # is the classic Go-plugin ABI trap: the .so must be built with the same Go
+      # toolchain and nakama-common version as the server. Assert the log line instead
+      # of trusting the "Nakama is up" signal.
+      - name: plugin loaded
+        run: |
+          docker compose -f deploy/docker-compose.yml logs nakama > /tmp/nakama.log
+          if ! grep -q "gamemodule loaded" /tmp/nakama.log; then
+            echo "the gamemodule plugin did not load; plugin/version-related lines:"
+            grep -iE "plugin|module|nakama-common|version|abi" /tmp/nakama.log | head -40
+            exit 1
+          fi
+          grep "gamemodule loaded" /tmp/nakama.log
+
+      - name: login through the plugin
+        run: go run ./tools/nakama-smoke | tee /tmp/nakama-smoke.log
+
+      - name: the account is really in the backend database
+        run: |
+          external_id="$(grep '^EXTERNAL_ID=' /tmp/nakama-smoke.log | cut -d= -f2)"
+          test -n "$external_id"
+          count="$(docker compose -f deploy/docker-compose.yml exec -T postgres \
+            psql -U gamebackend -d gamebackend -tAc \
+            "select count(*) from players where external_id = '$external_id'")"
+          echo "players with external_id=$external_id: $count"
+          test "$count" = "1"
+
+      - name: logs on failure
+        if: failure()
+        run: |
+          echo "=== compose ps ==="
+          docker compose -f deploy/docker-compose.yml ps
+          echo "=== backend ==="
+          docker compose -f deploy/docker-compose.yml logs --no-color backend | tail -60
+          echo "=== nakama ==="
+          docker compose -f deploy/docker-compose.yml logs --no-color nakama | tail -120
+
+      - name: tear down
+        if: always()
+        run: docker compose -f deploy/docker-compose.yml down -v
