@@ -99,7 +99,8 @@ services:
       - "127.0.0.1:7351:7351"   # console (http://127.0.0.1:7351)
       - "127.0.0.1:7349:7349"   # grpc
     volumes:
-      # Lua runtime module, loaded directly - no build step, no ABI to match
+      # Lua runtime module (`login.lua`: Nakama session -> backend player), loaded
+      # directly - no build step, no ABI to match
       # (ADR 0009). The Go plugin under nakama/modules still compiles and is kept as
       # the alternative path, but it is not mounted: a .so built anywhere other than
       # Nakama's own build container fails plugin.Open on package hashes.

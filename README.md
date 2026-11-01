@@ -104,8 +104,10 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 - **没有生产数据库**：schema 只在本地实例与 CI 的临时容器上跑过，没有备份、
   复制、连接池调优与密码策略（`docs/postgres-local.md` 的"未验证/未做"一节）
 - `docs/ue5-ds-integration.md` 里的 C++ 片段：未在 UE5 工程里编译
-- Nakama 桥接：插件已在 CI 的真实 Nakama 里加载并跑通「设备登录 → RPC → 后端账号」；
-  仍未验证的是**客户端侧**（UE5/浏览器怎么拿 Nakama session 再调后端）
+- Nakama 桥接（Lua 模块）：**CI 在真 Nakama 上验证过**——设备登录 → RPC `login` →
+  后端 `account.login` → 后端读取，并在 `players` 表里断言到对应行（spec 0009）。
+  仍未验证的是**客户端侧**：UE5/浏览器如何获取 Nakama session、调用 RPC、再用返回的
+  后端 token 调后端。
 - 真实托管战斗服：Edgegap 适配器 **已真机跑通**（分配 3s 就绪、拿到
   `172.237.14.252:32719`、释放后状态 TERMINATED）；**未确认**的是
   `RUNTIME_TOKEN` 是否真的出现在容器内环境（需要换成我们自己的 DS 镜像打日志）

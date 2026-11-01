@@ -69,6 +69,18 @@ flags 构建（即"在 Nakama 自己的构建容器里编译"），否则无法�
 `nakama/modules`（Go 插件）保留在仓库里并通过 `nakama-module` job 编译，作为备选路径；
 `tools/nakama-smoke` 与 RPC 契约（`login` → `{player, session_token}`）与实现语言无关。
 
+### 落地时踩到的两个 Lua 运行时细节（写下来，别再试）
+
+1. **`nk.http_request` 的第 3 个参数是 headers 表**，不是 body：
+   传 `(url, "POST", body, headers, timeout)` 会得到
+   `bad argument #3 ... (table expected, got string)`。
+   3.22 接受的形式是 `(url, "POST", headers, body, timeout)`。
+2. **返回三个值**：`code, headers_table, body_string`。只取第二个会拿到表，
+   表现为"返回体为空"。
+
+两个细节都写进了 `login.lua` 的注释与日志（它会打印实际接受的签名形式），
+并且 CI 在真 Nakama 上验证过（`nakama` job）。
+
 ## 原待定项（已由此决定回答）
 
 - 若失败仅源于 `CGO_ENABLED`/`GOAMD64` 等**一次性设置**：修好并保留 Go 插件，
