@@ -14,4 +14,4 @@ go 1.21
 // it, rather than guessing.
 require github.com/heroiclabs/nakama-common v1.32.0
 
-require google.golang.org/protobuf v1.35.2 // indirect
+require google.golang.org/protobuf v1.34.1 // indirect

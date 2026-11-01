@@ -237,7 +237,7 @@ jobs:
       - name: detect the server toolchain
         run: |
           ver="$(docker run --rm --entrypoint sh "heroiclabs/nakama:${NAKAMA_VERSION:-3.22.0}" \
-            -c 'grep -a -m1 -oE "go1\.[0-9]+(\.[0-9]+)?" /nakama/nakama' || true)"
+            -c 'grep -a -m1 -oE "go1\.[0-9]+\.[0-9]+" /nakama/nakama' || true)"
           if [ -z "$ver" ]; then
             echo "could not detect the Go toolchain inside the Nakama image"
             exit 1
