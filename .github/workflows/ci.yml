@@ -172,7 +172,9 @@ jobs:
 
       - name: a request must land in the database
         run: |
+          # Login is service-only (ADR 0010), so this call carries the service token.
           curl -fsS -X POST -H 'Content-Type: application/json' \
+            -H 'Authorization: Bearer dev-service' \
             -d '{"external_id":"ci-smoke"}' \
             http://127.0.0.1:8080/v1/account/sessions
           count="$(docker compose -f deploy/docker-compose.yml exec -T postgres \
@@ -388,11 +390,23 @@ jobs:
           count="$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM players")"
           echo "rows after deletion: $count"
 
+      # A drill restores into a *fresh* database, not over the live one: pg_restore
+      # --clean cannot drop tables in an order that satisfies foreign keys, and
+      # overwriting production in place is not a recovery plan anyway.
       - name: restoring brings the data back
         run: |
-          RESTORE_CONFIRM=yes sh scripts/db-restore.sh /tmp/ops.dump
-          count="$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM players WHERE id = 'p_backup'")"
-          echo "marker rows after restore: $count"
+          set -o pipefail
+          base="${DATABASE_URL%/*}"
+          psql "${DATABASE_URL%/*}/postgres" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS gamebackend_restore"
+          psql "${DATABASE_URL%/*}/postgres" -v ON_ERROR_STOP=1 -c "CREATE DATABASE gamebackend_restore"
+          if ! RESTORE_CONFIRM=yes DATABASE_URL="${base}/gamebackend_restore?sslmode=disable" \
+               sh scripts/db-restore.sh /tmp/ops.dump 2>&1 | tee /tmp/restore.log; then
+            echo "::error title=restore failed::$(tail -3 /tmp/restore.log | tr '\n' ' ' | cut -c1-400)"
+            exit 1
+          fi
+          count="$(psql "${base}/gamebackend_restore?sslmode=disable" -tAc \
+            "SELECT count(*) FROM players WHERE id = 'p_backup'")"
+          echo "marker rows in the restored copy: $count"
           test "$count" = "1"
 
       - name: restoring without confirmation is refused

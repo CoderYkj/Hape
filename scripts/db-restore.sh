@@ -5,6 +5,11 @@
 # It refuses to run unless RESTORE_CONFIRM=yes, because "restore" is also the name of
 # the command somebody runs at 3am on the wrong database.
 #
+# Prefer restoring into a FRESH database and pointing the service at it, rather than
+# overwriting a live one: pg_restore --clean drops objects in TOC order, which cannot
+# satisfy foreign keys, so an in-place restore of a schema with relations fails (and
+# "half restored" is worse than "not restored"). CI drills it that way.
+#
 #   RESTORE_CONFIRM=yes DATABASE_URL=postgres://... sh scripts/db-restore.sh backup.dump
 set -eu
 
