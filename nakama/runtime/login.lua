@@ -48,13 +48,25 @@ local function rpc_login(ctx, payload)
         ["Authorization"] = "Bearer " .. token,
     }
 
-    -- pcall because Lua reports failures as raised errors; the raised value is the
-    -- diagnosis (a network error, a nil function, a bad signature), so it is passed
-    -- back to the caller instead of being swallowed into a generic 503.
-    local ok, code, resp = pcall(nk.http_request, base .. "/v1/account/sessions", "POST", body, headers, 5000)
+    local url = base .. "/v1/account/sessions"
+    -- Nakama's Lua http_request reports an argument-order mismatch as a plain Lua
+    -- argument error, and the order has differed between releases (3.22 wants headers
+    -- as argument #3). Try the documented order, then the one 3.22 accepts; both are
+    -- logged so the next reader knows which one the image uses.
+    local first_err
+    local ok, code, resp = pcall(nk.http_request, url, "POST", headers, body, 5000)
+    if ok then
+        nk.logger_info("login: http_request(headers, body) form accepted")
+    else
+        first_err = tostring(code)
+        ok, code, resp = pcall(nk.http_request, url, "POST", body, headers, 5000)
+        if ok then
+            nk.logger_info("login: http_request(body, headers) form accepted")
+        end
+    end
     if not ok then
-        local detail = string.format("backend call failed (%s -> %s): %s",
-            tostring(base), tostring(nk.json_encode(headers)), tostring(code))
+        local detail = string.format("backend call failed (%s): %s | %s",
+            url, first_err or "-", tostring(code))
         nk.logger_error("login: " .. detail)
         error({ "login: " .. detail, 14 })
     end
