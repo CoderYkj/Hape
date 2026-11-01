@@ -245,14 +245,27 @@ jobs:
           echo "server toolchain: $ver"
           echo "TOOLCHAIN=$ver" >> "$GITHUB_ENV"
 
+      # GOTOOLCHAIN must be exported in the shell, not set through the workflow `env`
+      # expression: variables written to GITHUB_ENV become process environment for
+      # later steps, they are NOT part of the workflow env context. Reading one as an
+      # expression yields an empty string, the build silently falls back to the
+      # setup-go version, and the plugin ends up with a different standard library
+      # than the server - which shows up as "different version of package
+      # internal/goarch" from plugin.Open.
       - name: build the plugin with the server toolchain
         working-directory: nakama/modules
-        env:
-          GOTOOLCHAIN: ${{ env.TOOLCHAIN }}
         run: |
-          go version
+          toolchain="${TOOLCHAIN:-auto}"
+          echo "server toolchain: $toolchain"
+          GOTOOLCHAIN="$toolchain" go version
+          # Fail loudly here rather than at plugin.Open inside Nakama.
+          GOTOOLCHAIN="$toolchain" go version | grep -q "$toolchain" || {
+            echo "the go command did not switch to $toolchain"
+            GOTOOLCHAIN="$toolchain" go env GOVERSION
+            exit 1
+          }
           mkdir -p ../build
-          go build -buildmode=plugin -o ../build/gamemodule.so .
+          GOTOOLCHAIN="$toolchain" go build -buildmode=plugin -o ../build/gamemodule.so .
           ls -l ../build/gamemodule.so
 
       - name: start the stack
