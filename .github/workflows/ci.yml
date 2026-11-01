@@ -272,7 +272,7 @@ jobs:
           echo "nakama did not answer /healthcheck within 120s (see the diagnose steps)"
           exit 1
 
-      - name: diagnose: is the nakama container still running
+      - name: diagnose whether the nakama container is still running
         if: always()
         run: |
           docker compose -f deploy/docker-compose.yml ps -a
@@ -286,7 +286,7 @@ jobs:
             *) echo "container is NOT running - it crashed at startup"; exit 1 ;;
           esac
 
-      - name: diagnose: plugin ABI mismatch in the log
+      - name: diagnose plugin ABI mismatch in the log
         if: always()
         run: |
           docker compose -f deploy/docker-compose.yml logs --no-color nakama > /tmp/nakama-diag.log || true
@@ -297,7 +297,7 @@ jobs:
           fi
           echo "no plugin ABI complaint in the log"
 
-      - name: diagnose: what does the server say about itself
+      - name: diagnose what the server says about itself
         if: always()
         run: |
           docker compose -f deploy/docker-compose.yml logs --no-color --tail 25 nakama
