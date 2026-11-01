@@ -20,7 +20,19 @@ mkdir -p "$(dirname "$out")"
 tmp="$out.tmp.$$"
 trap 'rm -f "$tmp"' EXIT INT TERM
 
-pg_dump "$DATABASE_URL" --format=custom --no-owner --no-privileges --file="$tmp"
+# A dump is only as good as the client that wrote it. pg_dump 17 emits
+# `SET transaction_timeout = 0`, which server 16 rejects, so a newer client silently
+# produces a backup that cannot be restored into the very database it came from -
+# and you find out during the incident. Refuse to write it instead.
+client_major="$(pg_dump --version | sed -n 's/.* \([0-9][0-9]*\)\..*/\1/p')"
+server_major="$(psql -tAc 'SHOW server_version_num' "$DATABASE_URL" | cut -c1-2 | sed 's/^0//')"
+if [ -n "$client_major" ] && [ -n "$server_major" ] && [ "$client_major" -gt "$server_major" ]; then
+  echo "pg_dump $client_major against a $server_major server: this dump would not restore here." >&2
+  echo "use the matching client (with docker: postgres:$server_major) and try again." >&2
+  exit 1
+fi
+
+pg_dump --format=custom --no-owner --no-privileges --file="$tmp" "$DATABASE_URL"
 size="$(wc -c < "$tmp" | tr -d ' ')"
 if [ "$size" -lt 512 ]; then
   echo "backup is only $size bytes - treating it as a failure" >&2

@@ -25,6 +25,21 @@ if [ "${RESTORE_CONFIRM:-}" != "yes" ]; then
   exit 1
 fi
 
+# The dump records who wrote it (`pg_restore -l` prints "; Dumped by pg_dump version
+# 17.x"), and a dump from a newer major carries SET statements an older server
+# rejects. Fail before touching the database rather than half way through.
+# The header is `;     Dumped by pg_dump version: 17.2` - leading spaces and a colon,
+# so the pattern tolerates both. Getting this wrong silently disables the guard.
+dump_major="$(pg_restore -l "$file" 2>/dev/null \
+  | sed -n 's/^;[[:space:]]*Dumped by pg_dump version:[[:space:]]*\([0-9][0-9]*\)\..*/\1/p' \
+  | head -n 1)"
+server_major="$(psql -tAc 'SHOW server_version_num' "$DATABASE_URL" | cut -c1-2 | sed 's/^0//')"
+if [ -n "$dump_major" ] && [ -n "$server_major" ] && [ "$dump_major" -gt "$server_major" ]; then
+  echo "this dump was written by pg_dump $dump_major but the target server is $server_major," >&2
+  echo "so it cannot be restored here. Restore into a server of at least major $dump_major." >&2
+  exit 1
+fi
+
 echo "restoring $file into the database behind DATABASE_URL"
 pg_restore --dbname="$DATABASE_URL" --clean --if-exists --no-owner --no-privileges --single-transaction "$file"
 echo "restore complete"

@@ -383,11 +383,17 @@ jobs:
 
       - name: a backup survives losing the data
         run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c \
-            "INSERT INTO players (id, external_id, display_name) VALUES ('p_backup','ext-backup','Backup')"
-          sh scripts/db-backup.sh /tmp/ops.dump
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DELETE FROM players WHERE id = 'p_backup'"
-          count="$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM players")"
+          psql -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO players (id, external_id, display_name) VALUES ('p_backup','ext-backup','Backup')" \
+            "$DATABASE_URL"
+          # The dump has to come from a client matching the server: pg_dump 17 writes
+          # SET transaction_timeout, which server 16 rejects. Running the scripts inside
+          # the same image pins the pair instead of inheriting the runner's client.
+          docker run --rm --network host -e DATABASE_URL \
+            -v "$PWD:/w" -v /tmp:/tmp -w /w --entrypoint sh postgres:16 \
+            scripts/db-backup.sh /tmp/ops.dump
+          psql -v ON_ERROR_STOP=1 -c "DELETE FROM players WHERE id = 'p_backup'" "$DATABASE_URL"
+          count="$(psql -tAc "SELECT count(*) FROM players" "$DATABASE_URL")"
           echo "rows after deletion: $count"
 
       # A drill restores into a *fresh* database, not over the live one: pg_restore
@@ -397,15 +403,17 @@ jobs:
         run: |
           set -o pipefail
           base="${DATABASE_URL%/*}"
-          psql "${DATABASE_URL%/*}/postgres" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS gamebackend_restore"
-          psql "${DATABASE_URL%/*}/postgres" -v ON_ERROR_STOP=1 -c "CREATE DATABASE gamebackend_restore"
+          psql -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS gamebackend_restore" "${base}/postgres"
+          psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE gamebackend_restore" "${base}/postgres"
           if ! RESTORE_CONFIRM=yes DATABASE_URL="${base}/gamebackend_restore?sslmode=disable" \
-               sh scripts/db-restore.sh /tmp/ops.dump 2>&1 | tee /tmp/restore.log; then
+               docker run --rm --network host -e RESTORE_CONFIRM -e DATABASE_URL \
+                 -v "$PWD:/w" -v /tmp:/tmp -w /w --entrypoint sh postgres:16 \
+                 scripts/db-restore.sh /tmp/ops.dump 2>&1 | tee /tmp/restore.log; then
             echo "::error title=restore failed::$(tail -3 /tmp/restore.log | tr '\n' ' ' | cut -c1-400)"
             exit 1
           fi
-          count="$(psql "${base}/gamebackend_restore?sslmode=disable" -tAc \
-            "SELECT count(*) FROM players WHERE id = 'p_backup'")"
+          count="$(psql -tAc "SELECT count(*) FROM players WHERE id = 'p_backup'" \
+            "${base}/gamebackend_restore?sslmode=disable")"
           echo "marker rows in the restored copy: $count"
           test "$count" = "1"
 

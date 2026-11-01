@@ -231,9 +231,18 @@ RESTORE_CONFIRM=yes DATABASE_URL=... sh scripts/db-restore.sh /var/backups/gameb
 
 - 备份是 `pg_dump --format=custom`，写临时文件后 `mv`，**半截备份不会冒充完整备份**
   （小于 512 字节直接判失败）；
+- **`pg_dump`/`pg_restore` 的大版本必须与数据库一致**。客户端比服务端新时，dump 里会带
+  老服务端不认的语句（`pg_dump` 17 会写 `SET transaction_timeout = 0`，PG 16 直接报
+  `unrecognized configuration parameter`），于是备份当天成功、恢复当天失败。两个脚本都
+  自带护栏：备份端客户端版本高于服务端就**拒绝写盘**，恢复端从 dump 文件头读出
+  `Dumped by pg_dump version`，比目标服务端新就**拒绝执行**。用 docker 时跑
+  `postgres:<服务端大版本>` 镜像即可（CI 就是这么做的）；
+- **恢复到新库，不要原地覆盖**。`pg_restore --clean` 按 TOC 顺序 `DROP`，满足不了外键依赖，
+  原地恢复在有关系的 schema 上会失败——而"恢复了一半"比"没恢复"更糟。正确姿势：建空库
+  → 恢复进去 → 校验 → 把服务指向新库；
 - 恢复必须显式 `RESTORE_CONFIRM=yes`：这个命令在凌晨三点跑在错误的库上是真实的故障模式；
 - 备份只是备份：**没演练过的恢复不算备份**。CI 的 `ops` job 每次 push 都做一次
-  "写入 → 备份 → 删除 → 恢复 → 断言行回来了"。
+  "写入 → 备份 → 删除 → 恢复到新库 → 断言行回来了"。
 
 ### 11.5 回滚
 
@@ -246,7 +255,8 @@ RESTORE_CONFIRM=yes DATABASE_URL=... sh scripts/db-restore.sh /var/backups/gameb
 | 项 | 验证方式 |
 |---|---|
 | 迁移幂等 + append-only 校验 | `ops` job：跑两次断言 0 applied；篡改副本断言被拒 |
-| 备份/恢复可用 | `ops` job：写入 → 备份 → 删除 → 恢复 → 断言行回来 |
+| 备份/恢复可用 | `ops` job：写入 → 备份 → 删除 → **恢复到新库** → 断言行回来（脚本跑在 `postgres:16` 镜像里，锁住客户端版本） |
+| 版本不匹配会被拦住 | 本地实跑：桩 `pg_dump` 报 99 拒绝写盘；桩 `pg_restore` 报 99 拒绝执行且不碰库 |
 | 恢复需要确认 | `ops` job：不带 `RESTORE_CONFIRM` 断言失败 |
 | 生产 compose 缺密钥会失败 | `ops` job：无环境变量时 `config -q` 必须失败 |
 | 生产 compose 结构合法 | `ops` job：`--env-file backend.env.example config -q` |

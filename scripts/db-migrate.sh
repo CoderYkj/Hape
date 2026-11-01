@@ -21,8 +21,12 @@ if [ ! -d "$MIGRATIONS_DIR" ]; then
   exit 1
 fi
 
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -c \
-  'CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())'
+# Options before the connection string: PostgreSQL's getopt does not permute them
+# past the first positional argument, so `psql "$url" -c ...` works on glibc and
+# silently drops the query on Windows.
+psql -v ON_ERROR_STOP=1 -q -c \
+  'CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())' \
+  "$DATABASE_URL"
 
 applied=0
 skipped=0
@@ -32,8 +36,8 @@ for file in "$MIGRATIONS_DIR"/*.sql; do
   version="$(basename "$file")"
   checksum="$(sha256sum "$file" | cut -d' ' -f1)"
 
-  recorded="$(psql "$DATABASE_URL" -tAc \
-    "SELECT checksum FROM schema_migrations WHERE version = '$version'")"
+  recorded="$(psql -tAc \
+    "SELECT checksum FROM schema_migrations WHERE version = '$version'" "$DATABASE_URL")"
 
   if [ -n "$recorded" ]; then
     if [ "$recorded" != "$checksum" ]; then
@@ -47,9 +51,10 @@ for file in "$MIGRATIONS_DIR"/*.sql; do
   fi
 
   echo "apply  $version"
-  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$file"
-  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -c \
-    "INSERT INTO schema_migrations (version, checksum) VALUES ('$version', '$checksum')"
+  psql -v ON_ERROR_STOP=1 -q -f "$file" "$DATABASE_URL"
+  psql -v ON_ERROR_STOP=1 -q -c \
+    "INSERT INTO schema_migrations (version, checksum) VALUES ('$version', '$checksum')" \
+    "$DATABASE_URL"
   applied=$((applied + 1))
 done
 
