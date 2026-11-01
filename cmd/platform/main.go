@@ -32,25 +32,31 @@ func run() error {
 		return err
 	}
 
+	creds, err := httpx.ParseServiceCredentials(cfg.ServiceCredentialsRaw)
+	if err != nil {
+		return fmt.Errorf("BACKEND_SERVICE_CREDENTIALS: %w", err)
+	}
+
 	app, err := platform.New(platform.Config{
-		Env:               cfg.Env,
-		LogLevel:          cfg.LogLevel,
-		DevAuth:           cfg.DevAuth,
-		ServiceToken:      cfg.ServiceToken,
-		JWTKey:            cfg.JWTKey,
-		JWTIssuer:         cfg.JWTIssuer,
-		PlayerTokenTTL:    cfg.PlayerTokenTTL,
-		PlayerJWTKey:      cfg.PlayerJWTKey,
-		Allocator:         cfg.Allocator,
-		EdgegapToken:      cfg.EdgegapToken,
-		EdgegapApp:        cfg.EdgegapApp,
-		EdgegapVersion:    cfg.EdgegapVer,
-		EdgegapBaseURL:    cfg.EdgegapURL,
-		EdgegapLat:        cfg.EdgegapLat,
-		EdgegapLon:        cfg.EdgegapLon,
-		DatabaseURL:       cfg.DatabaseURL,
-		ReconcileInterval: cfg.ReconcileInterval,
-		SessionStaleAfter: cfg.SessionStaleAfter,
+		Env:                cfg.Env,
+		LogLevel:           cfg.LogLevel,
+		DevAuth:            cfg.DevAuth,
+		ServiceToken:       cfg.ServiceToken,
+		ServiceCredentials: creds,
+		JWTKey:             cfg.JWTKey,
+		JWTIssuer:          cfg.JWTIssuer,
+		PlayerTokenTTL:     cfg.PlayerTokenTTL,
+		PlayerJWTKey:       cfg.PlayerJWTKey,
+		Allocator:          cfg.Allocator,
+		EdgegapToken:       cfg.EdgegapToken,
+		EdgegapApp:         cfg.EdgegapApp,
+		EdgegapVersion:     cfg.EdgegapVer,
+		EdgegapBaseURL:     cfg.EdgegapURL,
+		EdgegapLat:         cfg.EdgegapLat,
+		EdgegapLon:         cfg.EdgegapLon,
+		DatabaseURL:        cfg.DatabaseURL,
+		ReconcileInterval:  cfg.ReconcileInterval,
+		SessionStaleAfter:  cfg.SessionStaleAfter,
 	})
 	if err != nil {
 		return err

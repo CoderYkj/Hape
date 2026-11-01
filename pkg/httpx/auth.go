@@ -49,14 +49,28 @@ type Authenticator interface {
 //	Authorization: Bearer dev-service
 type DevAuth struct {
 	ServiceToken string
+	// Credentials accepts several dev tokens at once, so the rotation path is
+	// exercisable locally and in tests rather than only in production.
+	Credentials ServiceCredentials
 }
 
-// NewDevAuth returns the development authenticator.
+// NewDevAuth returns the development authenticator for one service token.
 func NewDevAuth(serviceToken string) *DevAuth {
 	if serviceToken == "" {
-		serviceToken = "dev-service"
+		serviceToken = DevServiceToken
 	}
-	return &DevAuth{ServiceToken: serviceToken}
+	return &DevAuth{
+		ServiceToken: serviceToken,
+		Credentials:  ServiceCredentials{{Name: LegacyServiceCredentialName, Token: serviceToken}},
+	}
+}
+
+// NewDevAuthWithCredentials returns the development authenticator for a set of tokens.
+func NewDevAuthWithCredentials(creds ServiceCredentials) *DevAuth {
+	if len(creds) == 0 {
+		return NewDevAuth("")
+	}
+	return &DevAuth{Credentials: creds}
 }
 
 const devPlayerPrefix = "dev-player-"
@@ -76,10 +90,15 @@ func (d *DevAuth) Player(r *http.Request) (Principal, error) {
 
 // Service implements Authenticator.
 func (d *DevAuth) Service(r *http.Request) (Principal, error) {
-	if bearer(r) != d.ServiceToken {
+	creds := d.Credentials
+	if len(creds) == 0 && d.ServiceToken != "" {
+		creds = ServiceCredentials{{Name: LegacyServiceCredentialName, Token: d.ServiceToken}}
+	}
+	name, ok := creds.Lookup(bearer(r))
+	if !ok {
 		return Principal{}, apierr.Unauthenticated("missing or invalid service token")
 	}
-	return Principal{Service: "service"}, nil
+	return Principal{Service: name}, nil
 }
 
 func bearer(r *http.Request) string {

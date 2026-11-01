@@ -31,7 +31,9 @@ func newAuth(t *testing.T, cfg httpx.JWTAuthConfig) *httpx.JWTAuth {
 	if len(cfg.SecurityKey) == 0 {
 		cfg.SecurityKey = testKey
 	}
-	if cfg.ServiceToken == "" {
+	// Default only when the caller configured nothing: a test that passes an explicit
+	// credential set must not silently get the legacy single token as well.
+	if cfg.ServiceToken == "" && len(cfg.ServiceCredentials) == 0 {
 		cfg.ServiceToken = "service-secret"
 	}
 	if cfg.Resolve == nil {
@@ -218,6 +220,35 @@ func TestJWTAuthServiceToken(t *testing.T) {
 	}
 }
 
+// TestServiceCredentialsRotateWithoutDowntime pins the rotation contract: during the
+// overlap both credentials authenticate under their own names, and once the old one is
+// removed only the new one does.
+func TestServiceCredentialsRotateWithoutDowntime(t *testing.T) {
+	overlap := newAuth(t, httpx.JWTAuthConfig{ServiceCredentials: httpx.ServiceCredentials{
+		{Name: "nakama-old", Token: "old-secret"},
+		{Name: "nakama-new", Token: "new-secret"},
+	}})
+	for token, want := range map[string]string{"old-secret": "nakama-old", "new-secret": "nakama-new"} {
+		principal, err := overlap.Service(request(token))
+		if err != nil {
+			t.Fatalf("%s during the overlap: %v", token, err)
+		}
+		if principal.Service != want {
+			t.Fatalf("caller = %q, want %q", principal.Service, want)
+		}
+	}
+
+	retired := newAuth(t, httpx.JWTAuthConfig{ServiceCredentials: httpx.ServiceCredentials{
+		{Name: "nakama-new", Token: "new-secret"},
+	}})
+	if _, err := retired.Service(request("old-secret")); err == nil {
+		t.Fatal("the retired credential still authenticates")
+	}
+	if _, err := retired.Service(request("new-secret")); err != nil {
+		t.Fatalf("the surviving credential stopped working: %v", err)
+	}
+}
+
 func TestJWTAuthRejectsIncompleteConfiguration(t *testing.T) {
 	if _, err := httpx.NewJWTAuth(httpx.JWTAuthConfig{ServiceToken: "s", Resolve: resolverFor("p")}); err == nil {
 		t.Fatal("missing security key must be refused")
@@ -227,6 +258,18 @@ func TestJWTAuthRejectsIncompleteConfiguration(t *testing.T) {
 	}
 	if _, err := httpx.NewJWTAuth(httpx.JWTAuthConfig{SecurityKey: testKey, ServiceToken: "s"}); err == nil {
 		t.Fatal("missing resolver must be refused")
+	}
+	// A credential set that duplicates itself is a deployment mistake, not a detail to
+	// discover on the first request.
+	if _, err := httpx.NewJWTAuth(httpx.JWTAuthConfig{
+		SecurityKey: testKey,
+		ServiceCredentials: httpx.ServiceCredentials{
+			{Name: "a", Token: "same"},
+			{Name: "b", Token: "same"},
+		},
+		Resolve: resolverFor("p"),
+	}); err == nil {
+		t.Fatal("duplicate tokens must be refused at startup")
 	}
 }
 

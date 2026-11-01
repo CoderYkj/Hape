@@ -244,13 +244,43 @@ RESTORE_CONFIRM=yes DATABASE_URL=... sh scripts/db-restore.sh /var/backups/gameb
 - 备份只是备份：**没演练过的恢复不算备份**。CI 的 `ops` job 每次 push 都做一次
   "写入 → 备份 → 删除 → 恢复到新库 → 断言行回来了"。
 
-### 11.5 回滚
+### 11.5 服务凭证轮换
+
+服务间认证从"一个共享静态 token"变成"一组带名字的凭证"，因此可以**零停机**换密钥。
+配置用 `BACKEND_SERVICE_CREDENTIALS`（`name=token`，逗号分隔）：
+
+```bash
+# .env（root 0600），第一步：把新凭证加进去，旧的原样保留
+BACKEND_SERVICE_CREDENTIALS="nakama=<old>,nakama-v2=<new>"
+```
+
+流程（四步，任一步都可停在原地不影响服务）：
+
+1. **加**：把新凭证追加进集合，部署后端。启动日志应列出两个名字：
+   `auth selected mode=jwt service_credentials=[nakama nakama-v2]`
+2. **验**：用新凭证调一次服务接口（`account.login` 或任意 service op），返回 200；
+   用**不在集合里**的字符串调一次，返回 401。这确认的是"新凭证真的被读到"。
+3. **迁**：把调用方（Nakama 插件的 `BACKEND_SERVICE_TOKEN`、定时任务、运维脚本）
+   逐个换成新凭证。判据是请求日志：`caller=nakama` 归零、`caller=nakama-v2` 出现。
+4. **删**：去掉旧条目，再部署一次。旧凭证从此 401。
+
+注意事项：
+
+- **两个变量互斥**：`BACKEND_SERVICE_CREDENTIALS` 与 `BACKEND_SERVICE_TOKEN` 同时出现会
+  启动失败。这是刻意的——轮换是"在集合里加一条"，留下旧变量等于让一个操作者以为已退役的
+  凭证继续可用。
+- **没有宽限期**：删掉即失效。第 3 步没做完就做第 4 步，漏掉的调用方立刻 401（这是好事：
+  它比"悄悄用着旧凭证"更早暴露）。
+- **名字要可读且稳定**：`caller` 字段是唯一能回答"还有谁在用旧凭证"的证据。
+- 这一版只解决"能换"，**没有**解决"一条凭证能调所有服务接口"（最小权限），见 spec 0014 §9。
+
+### 11.6 回滚
 
 1. 镜像回滚：`BACKEND_IMAGE=<上一个 sha>` + `up -d`（无数据迁移时最安全）。
 2. 迁移回滚：**不支持向下迁移**。破坏性 schema 变更必须单独发布，先双写/回填再删列。
 3. 数据回滚：用备份 + `db-restore.sh`，且先确认备份里的 schema 与目标镜像兼容。
 
-### 11.6 这一节里哪些是 CI 验证过的
+### 11.7 这一节里哪些是 CI 验证过的
 
 | 项 | 验证方式 |
 |---|---|
@@ -259,6 +289,7 @@ RESTORE_CONFIRM=yes DATABASE_URL=... sh scripts/db-restore.sh /var/backups/gameb
 | 版本不匹配会被拦住 | 本地实跑：桩 `pg_dump` 报 99 拒绝写盘；桩 `pg_restore` 报 99 拒绝执行且不碰库 |
 | 恢复需要确认 | `ops` job：不带 `RESTORE_CONFIRM` 断言失败 |
 | 生产 compose 缺密钥会失败 | `ops` job：无环境变量时 `config -q` 必须失败 |
+| 凭证轮换 | `pkg/httpx` / `platform` 单测：重叠期两条都通过且各自身份正确、移除旧的后旧 401、重复 token 拒绝启动、（dev 与 prod 两条 auth 路径都覆盖） |
 | 生产 compose 结构合法 | `ops` job：`--env-file backend.env.example config -q` |
 | systemd 单元语法 | `ops` job：`systemd-analyze verify` |
 | 发布镜像可运行 | `release` job：build → 推 ghcr（sha tag）→ 拉回 → 跑起来探活 |

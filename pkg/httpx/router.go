@@ -85,15 +85,26 @@ func (r *Router) instrument(op api.Op, h HandlerFunc) http.Handler {
 			if status >= http.StatusInternalServerError {
 				level = slog.LevelError
 			}
-			r.log.LogAttrs(ctx, level, "request",
+			attrs := []slog.Attr{
 				slog.String("request_id", reqID),
-				slog.String("service", op.Service),
+				// "op_service" rather than "service": the logger already carries the
+				// process name under "service", and a duplicate JSON key means whichever
+				// one the parser keeps wins - the losing one silently disappears.
+				slog.String("op_service", op.Service),
 				slog.String("op", op.ID),
+			}
+			// Which credential authenticated the call: without it, "was the old token
+			// retired?" is unanswerable from the logs.
+			if caller, ok := PrincipalFrom(ctx); ok && caller.Service != "" {
+				attrs = append(attrs, slog.String("caller", caller.Service))
+			}
+			attrs = append(attrs,
 				slog.String("method", op.Method),
 				slog.String("path", rq.URL.Path),
 				slog.Int("status", status),
 				slog.Int64("duration_ms", time.Since(start).Milliseconds()),
 			)
+			r.log.LogAttrs(ctx, level, "request", attrs...)
 		}()
 
 		defer func() {

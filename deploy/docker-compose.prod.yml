@@ -44,7 +44,11 @@ services:
       BACKEND_ENV: prod
       BACKEND_ADDR: 0.0.0.0:8080
       BACKEND_DEV_AUTH: "false"
-      BACKEND_SERVICE_TOKEN: ${BACKEND_SERVICE_TOKEN:?set BACKEND_SERVICE_TOKEN}
+      # Rotation-ready: `name=token` pairs, several accepted at once. Setting this and
+      # BACKEND_SERVICE_TOKEN together is refused at startup on purpose (see
+      # docs/deploy.md 11.5): during a roll you add an entry, you do not keep both vars.
+      BACKEND_SERVICE_CREDENTIALS: ${BACKEND_SERVICE_CREDENTIALS:-}
+      BACKEND_SERVICE_TOKEN: ${BACKEND_SERVICE_TOKEN:-}
       BACKEND_JWT_KEY: ${BACKEND_JWT_KEY:?set BACKEND_JWT_KEY (Nakama session encryption key)}
       BACKEND_JWT_ISSUER: ${BACKEND_JWT_ISSUER:-nakama}
       BACKEND_DATABASE_URL: ${BACKEND_DATABASE_URL:?set BACKEND_DATABASE_URL (postgres://...)}

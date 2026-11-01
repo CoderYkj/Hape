@@ -21,9 +21,14 @@ type Config struct {
 	LogLevel     string
 	DevAuth      bool
 	ServiceToken string
-	JWTKey       string // Nakama session encryption key; required when DevAuth is off
-	PlayerJWTKey string // optional: separate key for backend-issued player tokens
-	JWTIssuer    string // optional `iss` check
+	// ServiceCredentialsRaw is BACKEND_SERVICE_CREDENTIALS (`name=token,...`). It
+	// supersedes ServiceToken: several named tokens can be valid at once, which is
+	// what makes a rotation possible without downtime. Parsed by the binary, because
+	// the credential rules live next to the authenticator that enforces them.
+	ServiceCredentialsRaw string
+	JWTKey                string // Nakama session encryption key; required when DevAuth is off
+	PlayerJWTKey          string // optional: separate key for backend-issued player tokens
+	JWTIssuer             string // optional `iss` check
 	// PlayerTokenTTL is how long a backend-issued player token lives.
 	PlayerTokenTTL time.Duration
 	Allocator      string // local | gamelift | edgegap | agones
@@ -61,27 +66,28 @@ func Load(service, defaultAddr string) (Config, error) {
 		return Config{}, err
 	}
 	return Config{
-		Service:           service,
-		Env:               envOr("BACKEND_ENV", "dev"),
-		Addr:              envOr("BACKEND_ADDR", defaultAddr),
-		LogLevel:          envOr("LOG_LEVEL", "info"),
-		DevAuth:           envOr("BACKEND_DEV_AUTH", "true") == "true",
-		ServiceToken:      os.Getenv("BACKEND_SERVICE_TOKEN"),
-		JWTKey:            os.Getenv("BACKEND_JWT_KEY"),
-		PlayerJWTKey:      os.Getenv("BACKEND_PLAYER_JWT_KEY"),
-		JWTIssuer:         os.Getenv("BACKEND_JWT_ISSUER"),
-		Allocator:         envOr("BACKEND_ALLOCATOR", "local"),
-		EdgegapToken:      os.Getenv("BACKEND_EDGEGAP_TOKEN"),
-		EdgegapApp:        envOr("BACKEND_EDGEGAP_APP", ""),
-		EdgegapVer:        os.Getenv("BACKEND_EDGEGAP_VERSION"),
-		EdgegapURL:        os.Getenv("BACKEND_EDGEGAP_BASE_URL"),
-		PlayerTokenTTL:    playerTokenTTL,
-		EdgegapLat:        floatOr("BACKEND_EDGEGAP_LATITUDE", 0),
-		EdgegapLon:        floatOr("BACKEND_EDGEGAP_LONGITUDE", 0),
-		DatabaseURL:       os.Getenv("BACKEND_DATABASE_URL"),
-		BatchRegions:      splitList(envOr("BACKEND_REGIONS", "local")),
-		ReconcileInterval: reconcile,
-		SessionStaleAfter: staleAfter,
+		Service:               service,
+		Env:                   envOr("BACKEND_ENV", "dev"),
+		Addr:                  envOr("BACKEND_ADDR", defaultAddr),
+		LogLevel:              envOr("LOG_LEVEL", "info"),
+		DevAuth:               envOr("BACKEND_DEV_AUTH", "true") == "true",
+		ServiceToken:          os.Getenv("BACKEND_SERVICE_TOKEN"),
+		ServiceCredentialsRaw: os.Getenv("BACKEND_SERVICE_CREDENTIALS"),
+		JWTKey:                os.Getenv("BACKEND_JWT_KEY"),
+		PlayerJWTKey:          os.Getenv("BACKEND_PLAYER_JWT_KEY"),
+		JWTIssuer:             os.Getenv("BACKEND_JWT_ISSUER"),
+		Allocator:             envOr("BACKEND_ALLOCATOR", "local"),
+		EdgegapToken:          os.Getenv("BACKEND_EDGEGAP_TOKEN"),
+		EdgegapApp:            envOr("BACKEND_EDGEGAP_APP", ""),
+		EdgegapVer:            os.Getenv("BACKEND_EDGEGAP_VERSION"),
+		EdgegapURL:            os.Getenv("BACKEND_EDGEGAP_BASE_URL"),
+		PlayerTokenTTL:        playerTokenTTL,
+		EdgegapLat:            floatOr("BACKEND_EDGEGAP_LATITUDE", 0),
+		EdgegapLon:            floatOr("BACKEND_EDGEGAP_LONGITUDE", 0),
+		DatabaseURL:           os.Getenv("BACKEND_DATABASE_URL"),
+		BatchRegions:          splitList(envOr("BACKEND_REGIONS", "local")),
+		ReconcileInterval:     reconcile,
+		SessionStaleAfter:     staleAfter,
 	}, nil
 }
 
@@ -98,8 +104,15 @@ func (c Config) Validate() error {
 	if c.IsProd() && c.DevAuth {
 		return fmt.Errorf("BACKEND_DEV_AUTH=true is refused when BACKEND_ENV=prod")
 	}
-	if !c.IsProd() && !c.DevAuth && c.ServiceToken == "" {
-		return fmt.Errorf("BACKEND_DEV_AUTH=false requires BACKEND_SERVICE_TOKEN")
+	// Setting both is refused rather than merged: during a rotation you add a second
+	// entry to BACKEND_SERVICE_CREDENTIALS, you do not leave the old variable in place.
+	// Merging would silently keep accepting a credential the operator believes retired.
+	if c.ServiceToken != "" && c.ServiceCredentialsRaw != "" {
+		return fmt.Errorf("set BACKEND_SERVICE_CREDENTIALS or BACKEND_SERVICE_TOKEN, not both " +
+			"(rotate by listing the old and new credentials in BACKEND_SERVICE_CREDENTIALS)")
+	}
+	if !c.IsProd() && !c.DevAuth && c.ServiceToken == "" && c.ServiceCredentialsRaw == "" {
+		return fmt.Errorf("BACKEND_DEV_AUTH=false requires BACKEND_SERVICE_CREDENTIALS (or the legacy BACKEND_SERVICE_TOKEN)")
 	}
 	if !c.DevAuth && c.JWTKey == "" {
 		return fmt.Errorf("BACKEND_DEV_AUTH=false requires BACKEND_JWT_KEY (Nakama session encryption key)")

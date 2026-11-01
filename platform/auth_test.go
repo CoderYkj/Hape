@@ -144,3 +144,40 @@ func doJSON(t *testing.T, base, method, path string, body any, bearer string) (i
 	_ = json.NewDecoder(resp.Body).Decode(&decoded)
 	return resp.StatusCode, decoded
 }
+
+// TestDevAuthAcceptsARotatingCredentialSet exercises the same mechanism in the mode the
+// local drills use, so rotation is not only covered by the production code path.
+func TestDevAuthAcceptsARotatingCredentialSet(t *testing.T) {
+	app, err := platform.New(platform.Config{
+		Env:       "dev",
+		DevAuth:   true,
+		Allocator: "local",
+		ServiceCredentials: httpx.ServiceCredentials{
+			{Name: "dev-old", Token: "dev-old-secret"},
+			{Name: "dev-new", Token: "dev-new-secret"},
+		},
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatalf("platform.New: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+	server := httptest.NewServer(app.Handler())
+	t.Cleanup(server.Close)
+
+	for _, token := range []string{"dev-old-secret", "dev-new-secret"} {
+		status, body := doJSON(t, server.URL, http.MethodPost, "/v1/account/sessions",
+			map[string]any{"external_id": "rotating-" + token}, token)
+		if status != http.StatusOK {
+			t.Fatalf("%s was rejected: %d (%v)", token, status, body)
+		}
+	}
+
+	// Anything that is not in the set is refused, including the default dev token the
+	// process did not configure.
+	status, _ := doJSON(t, server.URL, http.MethodPost, "/v1/account/sessions",
+		map[string]any{"external_id": "rotating-stranger"}, "dev-service")
+	if status != http.StatusUnauthorized {
+		t.Fatalf("unconfigured token = %d, want 401", status)
+	}
+}

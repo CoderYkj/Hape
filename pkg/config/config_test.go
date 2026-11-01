@@ -18,6 +18,8 @@ func clearEnv(t *testing.T) {
 		"LOG_LEVEL",
 		"BACKEND_DEV_AUTH",
 		"BACKEND_SERVICE_TOKEN",
+		"BACKEND_SERVICE_CREDENTIALS",
+		"BACKEND_JWT_KEY",
 		"BACKEND_ALLOCATOR",
 		"BACKEND_DATABASE_URL",
 		"BACKEND_REGIONS",
@@ -116,5 +118,68 @@ func TestValidateRequiresAPositiveWindow(t *testing.T) {
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("enabled sweep with a zero stale window must be refused")
+	}
+}
+
+// TestValidateRefusesBothCredentialVariables pins the rule that makes a rotation
+// unambiguous: during a roll you add a second entry to BACKEND_SERVICE_CREDENTIALS. A
+// leftover BACKEND_SERVICE_TOKEN would keep accepting a credential the operator
+// believes retired, so the two are refused together instead of merged.
+func TestValidateRefusesBothCredentialVariables(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("BACKEND_ENV", "staging")
+	t.Setenv("BACKEND_DEV_AUTH", "false")
+	t.Setenv("BACKEND_JWT_KEY", "key")
+	t.Setenv("BACKEND_SERVICE_TOKEN", "legacy-secret")
+	t.Setenv("BACKEND_SERVICE_CREDENTIALS", "nakama=secret")
+
+	cfg, err := config.Load("platform", ":8080")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	err = cfg.Validate()
+	if err == nil {
+		t.Fatal("both credential variables were accepted")
+	}
+	if !strings.Contains(err.Error(), "not both") {
+		t.Fatalf("error = %v, want it to say the two are exclusive", err)
+	}
+}
+
+// TestValidateAcceptsACredentialSetAlone is the other half: a rotatable set satisfies
+// the same requirement the single token used to.
+func TestValidateAcceptsACredentialSetAlone(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("BACKEND_ENV", "staging")
+	t.Setenv("BACKEND_DEV_AUTH", "false")
+	t.Setenv("BACKEND_JWT_KEY", "key")
+	t.Setenv("BACKEND_SERVICE_CREDENTIALS", "nakama=one,worker=two")
+
+	cfg, err := config.Load("platform", ":8080")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if cfg.ServiceCredentialsRaw != "nakama=one,worker=two" {
+		t.Fatalf("raw credentials = %q", cfg.ServiceCredentialsRaw)
+	}
+}
+
+// TestValidateRequiresSomeServiceCredential keeps the migration honest: turning dev auth
+// off without either variable is still a startup failure.
+func TestValidateRequiresSomeServiceCredential(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("BACKEND_ENV", "staging")
+	t.Setenv("BACKEND_DEV_AUTH", "false")
+	t.Setenv("BACKEND_JWT_KEY", "key")
+
+	cfg, err := config.Load("platform", ":8080")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("dev auth off with no service credential was accepted")
 	}
 }

@@ -37,8 +37,12 @@ type Config struct {
 	LogLevel     string
 	DevAuth      bool
 	ServiceToken string
-	Allocator    string
-	Logger       *slog.Logger
+	// ServiceCredentials accepts several named service tokens at once. When empty, a
+	// legacy single ServiceToken is wrapped as one credential named "service", so an
+	// existing deployment keeps working while it migrates to a rotatable set.
+	ServiceCredentials httpx.ServiceCredentials
+	Allocator          string
+	Logger             *slog.Logger
 	// Authenticator overrides the built-in choice entirely (tests, or a deployment
 	// with its own identity provider).
 	Authenticator httpx.Authenticator
@@ -184,10 +188,29 @@ func New(cfg Config) (*Platform, error) {
 	// to resolve Nakama's user id to a backend player id, which is the account
 	// store's job. Dev auth needs nothing.
 	auth := cfg.Authenticator
+	// One credential set for both authenticators: dev and production must not disagree
+	// about which tokens are valid, or a rotation would be verified in the wrong mode.
+	creds := cfg.ServiceCredentials
+	if len(creds) == 0 && cfg.ServiceToken != "" {
+		creds = httpx.ServiceCredentials{{Name: httpx.LegacyServiceCredentialName, Token: cfg.ServiceToken}}
+	}
+	if len(creds) == 0 && cfg.DevAuth {
+		// Dev stays zero-configuration: `go run ./cmd/platform` and every local tool
+		// share dev-service, exactly as before credentials became a set.
+		creds = httpx.ServiceCredentials{{Name: httpx.LegacyServiceCredentialName, Token: httpx.DevServiceToken}}
+	}
+	// Empty is not "invalid" here: the authenticator below reports the missing
+	// credential in the vocabulary of the mode it is building (a JWT verifier without a
+	// service token, or dev auth's default). Anything non-empty must be well-formed.
+	if len(creds) > 0 {
+		if err := creds.Validate(); err != nil {
+			return nil, fmt.Errorf("platform: service credentials: %w", err)
+		}
+	}
 	if auth == nil {
 		if cfg.DevAuth {
-			auth = httpx.NewDevAuth(cfg.ServiceToken)
-			log.Info("auth selected", "mode", "dev")
+			auth = httpx.NewDevAuthWithCredentials(creds)
+			log.Info("auth selected", "mode", "dev", "service_credentials", creds.Names())
 		} else {
 			// A deployment that wants player tokens signed with a different key than
 			// Nakama's can set BACKEND_PLAYER_JWT_KEY; by default one key signs both and
@@ -208,10 +231,10 @@ func New(cfg Config) (*Platform, error) {
 				return token, err
 			}
 			jwtAuth, err := httpx.NewJWTAuth(httpx.JWTAuthConfig{
-				SecurityKey:  []byte(cfg.JWTKey),
-				PlayerKey:    []byte(playerKey),
-				ServiceToken: cfg.ServiceToken,
-				Issuer:       cfg.JWTIssuer,
+				SecurityKey:        []byte(cfg.JWTKey),
+				PlayerKey:          []byte(playerKey),
+				ServiceCredentials: creds,
+				Issuer:             cfg.JWTIssuer,
 				Resolve: func(ctx context.Context, externalID string) (string, error) {
 					player, err := accountStore.LookupByExternalID(ctx, externalID)
 					if err != nil {
@@ -224,7 +247,7 @@ func New(cfg Config) (*Platform, error) {
 				return nil, fmt.Errorf("platform: production authenticator: %w", err)
 			}
 			auth = jwtAuth
-			log.Info("auth selected", "mode", "jwt")
+			log.Info("auth selected", "mode", "jwt", "service_credentials", creds.Names())
 		}
 	}
 	router := httpx.NewRouter("platform", log, auth)

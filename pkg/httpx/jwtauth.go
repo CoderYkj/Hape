@@ -28,14 +28,14 @@ import (
 // Nakama identity; mapping that to this backend's player record is the resolver's
 // job (see IdentityResolver), so pkg/httpx stays free of domain knowledge.
 type JWTAuth struct {
-	key          []byte
-	playerKey    []byte
-	serviceToken string
-	issuer       string
-	audience     string
-	leeway       time.Duration
-	now          func() time.Time
-	resolve      IdentityResolver
+	key       []byte
+	playerKey []byte
+	services  ServiceCredentials
+	issuer    string
+	audience  string
+	leeway    time.Duration
+	now       func() time.Time
+	resolve   IdentityResolver
 }
 
 // PlayerTokenIssuer is the iss claim of tokens this backend signs for its own players
@@ -50,8 +50,12 @@ type IdentityResolver func(ctx context.Context, externalID string) (playerID str
 type JWTAuthConfig struct {
 	// SecurityKey is Nakama's session encryption key (BACKEND_JWT_KEY).
 	SecurityKey []byte
-	// ServiceToken authenticates server-to-server callers (BACKEND_SERVICE_TOKEN).
+	// ServiceToken authenticates server-to-server callers (the legacy single-token
+	// variable). ServiceCredentials supersedes it: several named tokens can be valid
+	// at once, which is what makes rotation possible without downtime.
 	ServiceToken string
+	// ServiceCredentials is the set of accepted caller identities.
+	ServiceCredentials ServiceCredentials
 	// Issuer and Audience are optional; empty disables the check.
 	Issuer   string
 	Audience string
@@ -76,8 +80,15 @@ func NewJWTAuth(cfg JWTAuthConfig) (*JWTAuth, error) {
 	if len(cfg.SecurityKey) == 0 {
 		return nil, errors.New("httpx: JWT security key is required")
 	}
-	if cfg.ServiceToken == "" {
+	creds := cfg.ServiceCredentials
+	if len(creds) == 0 && cfg.ServiceToken != "" {
+		creds = ServiceCredentials{{Name: LegacyServiceCredentialName, Token: cfg.ServiceToken}}
+	}
+	if len(creds) == 0 {
 		return nil, errors.New("httpx: service token is required next to JWT auth")
+	}
+	if err := creds.Validate(); err != nil {
+		return nil, fmt.Errorf("httpx: %w", err)
 	}
 	if cfg.Resolve == nil {
 		return nil, errors.New("httpx: identity resolver is required")
@@ -92,14 +103,14 @@ func NewJWTAuth(cfg JWTAuthConfig) (*JWTAuth, error) {
 		cfg.Now = time.Now
 	}
 	return &JWTAuth{
-		key:          cfg.SecurityKey,
-		playerKey:    cfg.PlayerKey,
-		serviceToken: cfg.ServiceToken,
-		issuer:       cfg.Issuer,
-		audience:     cfg.Audience,
-		leeway:       cfg.Leeway,
-		now:          cfg.Now,
-		resolve:      cfg.Resolve,
+		key:       cfg.SecurityKey,
+		playerKey: cfg.PlayerKey,
+		services:  creds,
+		issuer:    cfg.Issuer,
+		audience:  cfg.Audience,
+		leeway:    cfg.Leeway,
+		now:       cfg.Now,
+		resolve:   cfg.Resolve,
 	}, nil
 }
 
@@ -130,18 +141,22 @@ func (a *JWTAuth) Player(r *http.Request) (Principal, error) {
 	return Principal{PlayerID: playerID, ExternalID: subject}, nil
 }
 
-// Service implements Authenticator. Service callers keep using the shared token:
-// they are trusted processes, not users, and a stolen JWT must not be enough to
-// submit a battle report.
+// Service implements Authenticator. Service callers present a shared secret: they are
+// trusted processes, not users, and a stolen player JWT must never be enough to submit
+// a battle report.
+//
+// The returned Principal carries the credential name, so a request log says which
+// caller acted - the fact that makes a rotation verifiable.
 func (a *JWTAuth) Service(r *http.Request) (Principal, error) {
 	presented := bearer(r)
 	if presented == "" {
 		return Principal{}, apierr.Unauthenticated("missing service token")
 	}
-	if !hmac.Equal([]byte(presented), []byte(a.serviceToken)) {
+	name, ok := a.services.Lookup(presented)
+	if !ok {
 		return Principal{}, apierr.Unauthenticated("invalid service token")
 	}
-	return Principal{Service: "service"}, nil
+	return Principal{Service: name}, nil
 }
 
 // verify checks the algorithm, the signature (with the key that matches the issuer),
