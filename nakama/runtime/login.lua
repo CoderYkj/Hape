@@ -48,11 +48,15 @@ local function rpc_login(ctx, payload)
         ["Authorization"] = "Bearer " .. token,
     }
 
+    -- pcall because Lua reports failures as raised errors; the raised value is the
+    -- diagnosis (a network error, a nil function, a bad signature), so it is passed
+    -- back to the caller instead of being swallowed into a generic 503.
     local ok, code, resp = pcall(nk.http_request, base .. "/v1/account/sessions", "POST", body, headers, 5000)
     if not ok then
-        nk.logger_error("login: backend unreachable: " .. tostring(code))
-        -- gRPC UNAVAILABLE (HTTP 503)
-        error({ "login: backend unavailable", 14 })
+        local detail = string.format("backend call failed (%s -> %s): %s",
+            tostring(base), tostring(nk.json_encode(headers)), tostring(code))
+        nk.logger_error("login: " .. detail)
+        error({ "login: " .. detail, 14 })
     end
     if code ~= 200 then
         nk.logger_error(string.format("login: backend returned %s: %s", tostring(code), tostring(resp)))

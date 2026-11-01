@@ -298,6 +298,8 @@ jobs:
           docker compose -f deploy/docker-compose.yml logs --no-color backend 2>/dev/null | grep -i "account/sessions" | tail -5 || true
           msg="$(grep -iE "nakama-smoke:|rpc login|no player|error" /tmp/nakama-smoke.log 2>/dev/null | head -3 | tr '\n' ' ' | cut -c1-400)"
           echo "::error title=smoke failure::${msg:-no detail captured}"
+          mod="$(docker compose -f deploy/docker-compose.yml logs --no-color nakama 2>/dev/null | grep -i "login:" | tail -2 | tr '\n' ' ' | cut -c1-400)"
+          echo "::error title=module failure::${mod:-no module error logged}"
 
       - name: the account is really in the backend database
         run: |
