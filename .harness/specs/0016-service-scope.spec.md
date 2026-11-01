@@ -84,7 +84,10 @@ BACKEND_SERVICE_SCOPE_ENFORCE=true
 # 4) 抽查一个越权调用：应返回 403 permission_denied（而不是 401）
 ```
 
-判据只看日志：`would-deny` 行带 `caller`、`op`、`op_service`、`scopes` 四个字段，够直接改配置。
+判据是**指标**而不是日志：观察模式累加 `backend_service_scope_would_deny_total`，切强制后
+该计数应恒为 0。两个计数器在启动时以 0 注册（`backend_service_scope_denied_total` 同理），
+所以"归零"是可查询的事实，不会和"指标没注册"混淆。日志行仍带
+`caller`/`op`/`op_service`/`scopes` 四个字段，用来定位要改哪条配置。
 
 ## 6. 失败模式
 
@@ -107,6 +110,7 @@ BACKEND_SERVICE_SCOPE_ENFORCE=true
 | 语义 | `Allows()`：具名/通配/空 scope 三态；`UnknownServices()` 报出拼错的 scope |
 | 端到端（平台） | 限 `account` 的凭证：`account.login` 200、`session.create` 403 且 code=`permission_denied`；同凭证在观察模式下 `session.create` 200 |
 | 覆盖性 | 解析 `deploy/systemd/backend.env.example` 的凭证行：每个 service-auth op 至少被一条凭证覆盖，且不含未知 service |
+| 指标 | 强制模式越权 → `backend_service_scope_denied_total` +1；观察模式 → `would_deny_total` +1 且 denied 不动；两个计数在启动后以 0 可见 |
 | 回归 | 玩家 token 仍不能调 service op；旧单 token 变量仍能全通（scope `*`） |
 
 ## 8. 回滚

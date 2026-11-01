@@ -193,7 +193,7 @@ graph TB
 |---|---|
 | JSON 日志（`request_id`/`op`/`status`/`caller`） | ✅ |
 | `/metrics`：请求计数、启动时间 | ✅ |
-| 业务指标：`backend_release_*`（5 条） | ✅ spec 0015 |
+| 业务指标：`backend_release_*`（5 条）、`backend_service_scope_*`（2 条） | ✅ spec 0015 / 0016 |
 | 告警规则文件（1 条：回收卡住 15m） | 🟡 文件在，未接真实 Prometheus |
 | rules/95 里的另外 4 条告警（5xx>1%、分配卡住、僵尸对局、经济 internal） | 🔜 只是文档 |
 

@@ -293,19 +293,34 @@ BACKEND_SERVICE_CREDENTIALS="nakama=<tok>:account,ops=<tok2>:*,worker=<tok3>:mat
 - **越权是 403 `permission_denied`**（不是 401）：凭证是真的，只是不允许做这件事。
 - **拼错的 service 会启动失败**：scope 指向本进程没有的域永远不会匹配，等于静默失效。
 
-落地顺序（**不要跳过观察期**）：
+落地顺序（**新部署**与**存量部署迁移**不一样，别混）：
 
 ```bash
-# 1) 观察模式：越权调用照常成功，只记一行 would-deny
-BACKEND_SERVICE_SCOPE_ENFORCE=false
-# 2) 部署后跑 24h，按日志核对（字段够直接改配置）：
-#    msg="service credential out of scope (not enforced)"  caller=... op=... op_service=... scopes=...
-# 3) 归零后切回强制，再部署
+# 新部署：直接强制。示例 env 里的 scope 已被覆盖性测试证明能触达所有 service-auth op，
+# 所以第一天强制是安全的，观察期只会让你少一层保护。
+BACKEND_SERVICE_SCOPE_ENFORCE=true
+
+# 存量部署改成凭证集时：先观察，确认没有漏配的调用方，再强制。
+BACKEND_SERVICE_SCOPE_ENFORCE=false   # 越权照常成功，只累加 would-deny 计数
+#   ↓ 部署后观察 24h，判据是一个数字（不是 grep 日志）：
+#   backend_service_scope_would_deny_total == 0 且一直为 0
+#   ↓ 归零后切回
 BACKEND_SERVICE_SCOPE_ENFORCE=true
 ```
 
-为什么必须分两步：CI 覆盖的是"仓库里的示例凭证能触达所有 op"（一条测试专门盯这个），
-但**你实际部署的凭证集合**只有真实流量能验证。
+判据用指标而不是日志：
+
+| 指标 | 含义 |
+|---|---|
+| `backend_service_scope_would_deny_total` | 观察模式下"本会被拒绝"的次数（应恒为 0 才切强制） |
+| `backend_service_scope_denied_total` | 强制模式下真正被拒绝的次数（非 0 = 有调用方 scope 不对，日志里有 caller/op） |
+
+两条计数在启动时以 0 注册，所以 `== 0` 是一个可查询的事实，而不是"指标不存在"。
+启动日志在观察模式下也会打一行 WARN 提醒"未强制"。
+
+为什么新部署可以直接强制：CI 覆盖的是"仓库里付运的示例凭证能触达所有 op"（一条测试专门
+盯这个）；而**你实际部署的凭证集合**（尤其是从旧部署迁移过来的）只有真实流量能验证——
+所以迁移走观察期，新部署不用。
 
 ### 11.6 回滚
 
@@ -324,7 +339,7 @@ BACKEND_SERVICE_SCOPE_ENFORCE=true
 | 生产 compose 缺密钥会失败 | `ops` job：无环境变量时 `config -q` 必须失败 |
 | 回收回读 | `pkg/battlealloc` 假厂商：停止后先 `running=true` 再 `false` → 成功；一直 running → 可重试并带状态；404/瞬时 500 → 成功；401 → 永久失败 |
 | 回收重试 | `services/session`：回收失败时战报仍 `applied=true` 且会话进 `release_pending`；allocator 恢复后 `RetryReleases` 清标记；持续失败时 attempts 递增 |
-| 凭证最小权限 | `pkg/httpx` 解析/语义单测；`platform` 端到端：限 `account` 的凭证调 `session.create` 得 403、观察模式下得 200；覆盖性测试断言示例 env 能触达每个 service-auth op |
+| 凭证最小权限 | `pkg/httpx` 解析/语义单测；`platform` 端到端：限 `account` 的凭证调 `session.create` 得 403、观察模式下得 200；两个 scope 计数器分别在两种模式下 +1；覆盖性测试断言示例 env 能触达每个 service-auth op |
 | 凭证轮换 | `pkg/httpx` / `platform` 单测：重叠期两条都通过且各自身份正确、移除旧的后旧 401、重复 token 拒绝启动、（dev 与 prod 两条 auth 路径都覆盖） |
 | 生产 compose 结构合法 | `ops` job：`--env-file backend.env.example config -q` |
 | systemd 单元语法 | `ops` job：`systemd-analyze verify` |

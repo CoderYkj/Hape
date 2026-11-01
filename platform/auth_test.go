@@ -236,3 +236,57 @@ func TestServiceScopeIsEnforcedPerService(t *testing.T) {
 		t.Fatalf("observe mode = %d, want 200 (nothing should be refused yet)", status)
 	}
 }
+
+// TestScopeRefusalsAreCounted is how the observe-then-enforce rollout gets a number: in
+// observe mode out-of-scope calls increment the would-deny counter (and the deployment
+// keeps working), and once enforcement is on the same call increments the denied counter.
+func TestScopeRefusalsAreCounted(t *testing.T) {
+	scoped := httpx.ServiceCredentials{
+		{Name: "nakama", Token: "nakama-secret", Services: []string{"account"}},
+	}
+	newServer := func(t *testing.T, observe bool) string {
+		t.Helper()
+		app, err := platform.New(platform.Config{
+			Env:                  "dev",
+			DevAuth:              true,
+			Allocator:            "local",
+			ServiceCredentials:   scoped,
+			ObserveServiceScopes: observe,
+			Logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
+		})
+		if err != nil {
+			t.Fatalf("platform.New: %v", err)
+		}
+		t.Cleanup(func() { _ = app.Close() })
+		server := httptest.NewServer(app.Handler())
+		t.Cleanup(server.Close)
+		return server.URL
+	}
+	outOfScope := map[string]any{"match_id": "m_count", "players": []string{"p_1", "p_2"}}
+
+	enforced := newServer(t, false)
+	// Both counters exist from the first scrape, even before anything happened.
+	body := scrapeMetrics(t, enforced)
+	for _, want := range []string{
+		`backend_service_scope_denied_total{service="platform"} 0`,
+		`backend_service_scope_would_deny_total{service="platform"} 0`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("counter is not published at zero (%q):", want)
+		}
+	}
+	doJSON(t, enforced, http.MethodPost, "/v1/session/sessions", outOfScope, "nakama-secret")
+	if body := scrapeMetrics(t, enforced); !strings.Contains(body, `backend_service_scope_denied_total{service="platform"} 1`) {
+		t.Fatalf("a refused call was not counted:\n%s", body)
+	}
+
+	observed := newServer(t, true)
+	doJSON(t, observed, http.MethodPost, "/v1/session/sessions", outOfScope, "nakama-secret")
+	body = scrapeMetrics(t, observed)
+	if !strings.Contains(body, `backend_service_scope_would_deny_total{service="platform"} 1`) {
+		t.Fatalf("a would-deny was not counted:\n%s", body)
+	}
+	if strings.Contains(body, `backend_service_scope_denied_total{service="platform"} 1`) {
+		t.Fatalf("observe mode counted a real denial:\n%s", body)
+	}
+}

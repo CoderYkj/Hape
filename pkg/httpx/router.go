@@ -41,11 +41,18 @@ func NewRouter(service string, log *slog.Logger, auth Authenticator) *Router {
 	if log == nil {
 		log = slog.Default()
 	}
+	metrics := NewMetrics(service)
+	// Register the scope counters at zero: the observe-mode rollout is judged by
+	// "would-deny is zero", and a counter that only appears after the first event makes
+	// that query indistinguishable from "the metric is broken".
+	metrics.AddCounter("service_scope_denied", 0)
+	metrics.AddCounter("service_scope_would_deny", 0)
+
 	return &Router{
 		service:       service,
 		auth:          auth,
 		log:           log,
-		metrics:       NewMetrics(service),
+		metrics:       metrics,
 		mux:           http.NewServeMux(),
 		enforceScopes: true,
 	}
@@ -204,9 +211,13 @@ func (r *Router) scopeAllows(ctx context.Context, op api.Op, p Principal) bool {
 	if !r.enforceScopes {
 		// Observe mode: say exactly what enforcement would have refused, with the
 		// identity and the service, because that line is the input to fixing scopes.
+		// The counter is what the rollout is judged on: "would-deny has been zero for a
+		// day" is a query, not a log grep.
+		r.metrics.AddCounter("service_scope_would_deny", 1)
 		r.log.WarnContext(ctx, "service credential out of scope (not enforced)",
 			"caller", p.Service, "op", op.ID, "op_service", op.Service, "scopes", p.Scopes)
 		return true
 	}
+	r.metrics.AddCounter("service_scope_denied", 1)
 	return false
 }

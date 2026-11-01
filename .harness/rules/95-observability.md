@@ -31,6 +31,8 @@ backend_release_max_attempts{service}            gauge    最严重那场的重�
 backend_release_oldest_pending_seconds{service}  gauge    最老待回收的等待时长
 backend_release_failed_total{service}            counter  累计失败的回收重试
 backend_release_confirmed_total{service}         counter  累计成功的回收重试
+backend_service_scope_denied_total{service}      counter  强制模式下被 scope 拒绝的调用
+backend_service_scope_would_deny_total{service}  counter  观察模式下"本会被拒绝"的调用（应为 0）
 ```
 
 计数器即使为 0 也会注册：`rate()` 和看板在第一次清扫后就能用，不用等它"先发生过一次"。
