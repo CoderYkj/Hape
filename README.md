@@ -46,6 +46,7 @@ make verify                       # Linux / CI
 | 新人 | 本文件 -> `docs/architecture.md` -> `docs/runbook-local-dev.md` |
 | 改接口的人 | `docs/api-contract.md` + `.harness/rules/30-api-contract.md` |
 | 接战斗服的人 | `docs/ue5-ds-integration.md` + `.harness/rules/90-battle-integration.md` |
+| 写客户端的人 | `docs/ue5-client-model.md`（客户端只做四件事 + UE5 转写指引）+ `clients/minimal`（可跑的最小实现） |
 | 要接托管厂商的人 | `docs/edgegap-setup.md`（第一家：控制台要建什么、API 形状、后端配置） |
 | 要部署的人 | `docs/deploy.md`（镜像 / compose / 环境变量 / 探针 / 回滚） |
 | 要连数据库的人 | `docs/postgres-local.md`（本机免安装实例）+ `.harness/adr/0006`（驱动选型待拍板） |

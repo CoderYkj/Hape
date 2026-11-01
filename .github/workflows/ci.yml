@@ -307,6 +307,13 @@ jobs:
           mod="$(docker compose -f deploy/docker-compose.yml logs --no-color nakama 2>/dev/null | grep -i "login:" | tail -2 | tr '\n' ' ' | cut -c1-400)"
           echo "::error title=module failure::${mod:-no module error logged}"
 
+      # The client half, in the smallest verifiable form: login -> exchange -> profile
+      # -> enqueue -> poll. Same protocol a UE5 client must speak.
+      - name: the client half (login, exchange, profile, enqueue, poll)
+        run: |
+          go run ./clients/minimal 2>&1 | tee /tmp/client.log
+          grep -q '^CLIENT_OK=1$' /tmp/client.log
+
       - name: the account is really in the backend database
         run: |
           external_id="$(grep '^EXTERNAL_ID=' /tmp/nakama-smoke.log | cut -d= -f2)"
