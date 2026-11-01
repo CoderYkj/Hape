@@ -230,9 +230,27 @@ jobs:
           go-version-file: nakama/modules/go.mod
           cache-dependency-path: nakama/modules/go.sum
 
-      - name: build the plugin
-        working-directory: nakama/modules
+      # A Go plugin shares type information with the binary that loads it, so the .so
+      # must be built with the same Go toolchain and the same nakama-common version
+      # as the server - otherwise plugin.Open fails and Nakama exits at startup.
+      # Rather than guessing the toolchain, read it out of the server binary.
+      - name: detect the server toolchain
         run: |
+          ver="$(docker run --rm --entrypoint sh "heroiclabs/nakama:${NAKAMA_VERSION:-3.22.0}" \
+            -c 'grep -a -m1 -oE "go1\.[0-9]+(\.[0-9]+)?" /nakama/nakama' || true)"
+          if [ -z "$ver" ]; then
+            echo "could not detect the Go toolchain inside the Nakama image"
+            exit 1
+          fi
+          echo "server toolchain: $ver"
+          echo "TOOLCHAIN=$ver" >> "$GITHUB_ENV"
+
+      - name: build the plugin with the server toolchain
+        working-directory: nakama/modules
+        env:
+          GOTOOLCHAIN: ${{ env.TOOLCHAIN }}
+        run: |
+          go version
           mkdir -p ../build
           go build -buildmode=plugin -o ../build/gamemodule.so .
           ls -l ../build/gamemodule.so
