@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gamebackend 架构图（带标注）</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --card:#fff; --ink:#1f2430; --muted:#5b6472; --line:#d8dde6;
+    --ok:#1a7f4b; --mid:#a86b00; --todo:#8a8f98; --accent:#2d5cff;
+    --okbg:#e7f6ee; --midbg:#fdf3e0; --todobg:#eef0f3;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 20px 80px;background:var(--bg);color:var(--ink);
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+  main{max-width:1180px;margin:0 auto}
+  h1{font-size:26px;margin:0 0 6px}
+  h2{font-size:20px;margin:42px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--line)}
+  h3{font-size:16px;margin:24px 0 8px}
+  p.lead{color:var(--muted);margin:0 0 18px}
+  code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;
+    background:#eef1f6;padding:1px 5px;border-radius:4px}
+  table{border-collapse:collapse;width:100%;margin:10px 0 18px;background:var(--card);
+    box-shadow:0 1px 2px rgba(20,30,50,.06);border-radius:8px;overflow:hidden}
+  th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top;font-size:14px}
+  th{background:#f0f3f8;font-weight:600;white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  .badge{display:inline-block;font-size:12px;padding:1px 7px;border-radius:999px;white-space:nowrap;font-weight:600}
+  .ok{background:var(--okbg);color:var(--ok)}
+  .mid{background:var(--midbg);color:var(--mid)}
+  .todo{background:var(--todobg);color:var(--todo)}
+  .dgm{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;margin:12px 0 6px;overflow-x:auto}
+  .dgm svg{display:block;min-width:900px;width:100%;height:auto}
+  .cap{color:var(--muted);font-size:13px;margin:0 0 22px}
+  .grid{display:grid;gap:14px}
+  .g3{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+  .card{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);
+    border-radius:8px;padding:12px 14px;box-shadow:0 1px 2px rgba(20,30,50,.05)}
+  .card h4{margin:0 0 6px;font-size:15px}
+  .card ul{margin:6px 0 0 18px;padding:0}
+  .card li{margin:2px 0;font-size:14px}
+  .card.okc{border-left-color:var(--ok)} .card.midc{border-left-color:var(--mid)} .card.todoc{border-left-color:var(--todo)}
+  .tree{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;font-size:14px}
+  .tree ul{list-style:none;margin:4px 0;padding-left:18px;border-left:1px dashed var(--line)}
+  .tree > ul{border-left:none;padding-left:0}
+  .tree li{margin:3px 0}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin:8px 0 0;color:var(--muted);font-size:13px}
+  footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+  @media print{
+    body{background:#fff;padding:0}
+    .dgm,.card,table{box-shadow:none}
+    h2{page-break-after:avoid}
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>gamebackend 架构图（带标注）</h1>
+<p class="lead">
+  一局联机对局的完整链路：证书/身份、匹配、分配战斗服、局内权威、结算扇出、回收计费。
+  每个方框都标了<strong>它主要做什么</strong>和<strong>验证到了什么程度</strong>。
+  事实来源是代码，本页与之不一致时以代码为准。生成于 2026-11-01（对应 spec 0016 的实现状态）。
+</p>
+<div class="legend">
+  <span><span class="badge ok">✅ 已验证</span> CI 真跑或真机实跑，可复现</span>
+  <span><span class="badge mid">🟡 已实现未验证</span> 代码与测试在，缺真实环境或未接线</span>
+  <span><span class="badge todo">⬜ 未实现</span> 有设计/契约，没有代码</span>
+</div>
+
+<h2>1. 部署拓扑</h2>
+<div class="dgm">
+<svg viewBox="0 0 1160 800" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="部署拓扑图">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4a5568"/>
+    </marker>
+    <marker id="ard" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a94a6"/>
+    </marker>
+  </defs>
+
+  <!-- groups -->
+  <rect x="24" y="72" width="300" height="270" rx="12" fill="#f4f7ff" stroke="#c7d4f7" stroke-dasharray="6 5"/>
+  <text x="44" y="100" font-size="14" font-weight="700" fill="#3b4a6b">客户端侧</text>
+  <rect x="420" y="40" width="380" height="720" rx="12" fill="#fbfcfe" stroke="#d8dde6" stroke-dasharray="6 5"/>
+  <text x="440" y="68" font-size="14" font-weight="700" fill="#3b4a6b">单机主机（生产目标）</text>
+  <rect x="880" y="72" width="250" height="450" rx="12" fill="#fff8f2" stroke="#f0d6bd" stroke-dasharray="6 5"/>
+  <text x="900" y="100" font-size="14" font-weight="700" fill="#7a5320">托管战斗服 · Edgegap</text>
+
+  <!-- client nodes -->
+  <rect x="54" y="122" width="240" height="76" rx="9" fill="#fff" stroke="#c7d4f7"/>
+  <text x="70" y="148" font-size="14" font-weight="600">UE5 客户端</text>
+  <text x="70" y="170" font-size="12.5" fill="#8a8f98">在引擎里实现 · 未构建 ⬜</text>
+  <text x="70" y="188" font-size="12" fill="#5b6472">登录 / 排队 / 连 DS / 看结算</text>
+
+  <rect x="54" y="222" width="240" height="76" rx="9" fill="#fff" stroke="#1a7f4b"/>
+  <text x="70" y="248" font-size="14" font-weight="600">clients/minimal ✅</text>
+  <text x="70" y="270" font-size="12" fill="#5b6472">同一套协议的可跑模型：</text>
+  <text x="70" y="288" font-size="12" fill="#5b6472">身份→排队→找服务器→UDP→结算</text>
+
+  <!-- host nodes -->
+  <rect x="440" y="110" width="340" height="86" rx="9" fill="#fff" stroke="#1a7f4b"/>
+  <text x="458" y="136" font-size="14" font-weight="600">Nakama ✅</text>
+  <text x="458" y="158" font-size="12" fill="#5b6472">全局账号与会话：设备/Steam/Apple 登录、</text>
+  <text x="458" y="176" font-size="12" fill="#5b6472">RPC 桥接、好友/公会/聊天（社交类留在这里）</text>
+
+  <rect x="440" y="250" width="340" height="130" rx="9" fill="#fff" stroke="#2d5cff" stroke-width="1.6"/>
+  <text x="458" y="276" font-size="14" font-weight="600">backend：platform 单进程 ✅</text>
+  <text x="458" y="298" font-size="12" fill="#5b6472">7 个领域服务 + 22 个接口，全在一个进程：</text>
+  <text x="458" y="316" font-size="12" fill="#5b6472">account/team/matchmaking/session/</text>
+  <text x="458" y="334" font-size="12" fill="#5b6472">progress/economy/rank</text>
+  <text x="458" y="356" font-size="12" fill="#5b6472">结算扇出 · 超时对账 · 回收重试 · 指标</text>
+
+  <rect x="440" y="428" width="340" height="76" rx="9" fill="#fff" stroke="#1a7f4b"/>
+  <text x="458" y="454" font-size="14" font-weight="600">PostgreSQL 16 ✅</text>
+  <text x="458" y="476" font-size="12" fill="#5b6472">14 张表 · 3 个迁移 · 41 条约束断言</text>
+
+  <rect x="440" y="548" width="340" height="76" rx="9" fill="#fff" stroke="#a86b00"/>
+  <text x="458" y="574" font-size="14" font-weight="600">Prometheus 🟡</text>
+  <text x="458" y="596" font-size="12" fill="#5b6472">指标已暴露；告警规则 1 条成文，未接线</text>
+
+  <!-- vendor nodes -->
+  <rect x="900" y="140" width="210" height="96" rx="9" fill="#fff" stroke="#1a7f4b"/>
+  <text x="916" y="166" font-size="14" font-weight="600">参考 DS 镜像 ✅</text>
+  <text x="916" y="188" font-size="12" fill="#5b6472">读注入环境 → 监听 →</text>
+  <text x="916" y="206" font-size="12" fill="#5b6472">ready → 打一局 → 战报</text>
+  <text x="916" y="224" font-size="12" fill="#5b6472">（spec 0012）</text>
+
+  <rect x="900" y="286" width="210" height="96" rx="9" fill="#fff" stroke="#8a8f98"/>
+  <text x="916" y="312" font-size="14" font-weight="600">UE5 Dedicated Server</text>
+  <text x="916" y="334" font-size="12" fill="#8a8f98">未构建 ⬜</text>
+  <text x="916" y="352" font-size="12" fill="#5b6472">替换镜像里的二进制，</text>
+  <text x="916" y="370" font-size="12" fill="#5b6472">契约不变</text>
+
+  <text x="900" y="430" font-size="12" fill="#7a5320">分配 4s 就绪 · 回收 ~2s 确认（实测）</text>
+  <text x="900" y="452" font-size="12" fill="#7a5320">1 个并发部署槽</text>
+
+  <!-- arrows -->
+  <path d="M 296 140 L 436 132" stroke="#4a5568" stroke-width="1.6" fill="none" marker-end="url(#ar)"/>
+  <text x="330" y="126" font-size="12" fill="#3b4a6b">① 设备登录</text>
+
+  <path d="M 610 198 L 610 246" stroke="#4a5568" stroke-width="1.6" fill="none" marker-end="url(#ar)"/>
+  <text x="620" y="228" font-size="12" fill="#3b4a6b">② RPC login</text>
+
+  <path d="M 296 262 L 436 288" stroke="#4a5568" stroke-width="1.6" fill="none" marker-end="url(#ar)"/>
+  <text x="300" y="286" font-size="12" fill="#3b4a6b">③ 业务 HTTP</text>
+
+  <path d="M 784 288 L 896 210" stroke="#4a5568" stroke-width="1.6" fill="none" marker-end="url(#ar)"/>
+  <text x="806" y="292" font-size="12" fill="#3b4a6b">④ 分配/释放</text>
+
+  <path d="M 896 330 L 786 344" stroke="#4a5568" stroke-width="1.6" fill="none" marker-end="url(#ar)"/>
+  <text x="800" y="330" font-size="12" fill="#3b4a6b">⑤ ready+战报</text>
+
+  <path d="M 176 300 C 176 640 700 740 1005 700 C 1090 660 1090 470 1002 390" stroke="#8a94a6"
+        stroke-width="1.6" stroke-dasharray="6 5" fill="none" marker-end="url(#ard)"/>
+  <text x="470" y="742" font-size="12" fill="#5b6472">⑥ 客户端直连 UDP（地址来自 by-match，v0 无 relay）</text>
+
+  <path d="M 610 384 L 610 424" stroke="#4a5568" stroke-width="1.6" fill="none" marker-end="url(#ar)"/>
+  <text x="620" y="410" font-size="12" fill="#5b6472">读写</text>
+
+  <path d="M 610 508 L 610 544" stroke="#8a94a6" stroke-width="1.6" stroke-dasharray="6 5" fill="none" marker-end="url(#ard)"/>
+  <text x="620" y="532" font-size="12" fill="#5b6472">/metrics</text>
+</svg>
+</div>
+<p class="cap">实线 = 主要数据流；虚线 = 控制/观测流。①–⑥ 与下表的编号一一对应。</p>
+
+<h2>2. 每个环节主要做什么</h2>
+<table>
+<thead><tr><th>编号</th><th>环节</th><th>主要功能（做什么 / 不做什么）</th><th>状态</th><th>代码与规格</th></tr></thead>
+<tbody>
+<tr><td>①</td><td>Nakama 登录</td><td>Nakama 是<strong>身份的唯一来源</strong>：设备/第三方账号登录、发 session token。它不决定游戏内经济、不分配战斗服。</td><td><span class="badge ok">✅</span></td><td><code>nakama/runtime/login.lua</code> · spec 0009</td></tr>
+<tr><td>②</td><td>RPC 桥接</td><td>Nakama 用<strong>服务凭证</strong>调后端 <code>account.login</code>，把外部身份换成后端 <code>player_id</code> + 后端 token。客户端拿不到服务凭证，也不能自报身份。</td><td><span class="badge ok">✅</span></td><td><code>services/account</code> · ADR 0010 / spec 0011</td></tr>
+<tr><td>③</td><td>业务 HTTP</td><td>后端 token 之上的一切：读档案、排队、轮询票据、按 match 找服务器、读结算。入口按 op 声明鉴权级别（玩家 / 服务），越权与越 scope 都拒绝。</td><td><span class="badge ok">✅</span></td><td><code>pkg/httpx</code> · spec 0016</td></tr>
+<tr><td>④</td><td>匹配与分配</td><td>matchmaking 按队列与 MMR 组局；session 服务调 <strong>Allocator</strong> 申请实例，把 <code>RUNTIME_TOKEN</code> 与参战名单注入容器。分配失败会落 <code>failed</code>，不留僵尸会话。</td><td><span class="badge ok">✅</span>（Edgegap 真机）</td><td><code>pkg/battlealloc</code> · spec 0007/0013</td></tr>
+<tr><td>⑤</td><td>战斗服上报</td><td>DS 先报 <code>ready</code>（它才知道自己监听在哪），打完报<strong>权威战报</strong>。两个报都要双凭证：服务 token（进程）+ 每场 <code>X-Session-Token</code>（会话）。<code>result_id</code> 幂等，重启复用。</td><td><span class="badge ok">✅</span></td><td><code>services/session</code> · spec 0008/0012</td></tr>
+<tr><td>⑥</td><td>客户端直连 DS</td><td>v0 无 relay：客户端拿 <code>address:port</code> 直接开 UDP。局内命中/伤害/胜负全由 DS 决定，客户端只送输入。</td><td><span class="badge ok">✅</span>（参考 DS 5/5 回声）</td><td>ADR 0002 · spec 0013</td></tr>
+<tr><td>—</td><td>结算扇出</td><td>战报被接受后<strong>一个事务</strong>写：战报存档 + 经验 + 钱包账本 + 评分 + 会话 <code>finished</code>。全成功才算结算；失败返回 503，用同一 <code>result_id</code> 重试，各下游幂等去重（见第 3 节图）。</td><td><span class="badge ok">✅</span></td><td><code>platform/sink.go</code> · ADR 0007</td></tr>
+<tr><td>—</td><td>回收与对账</td><td>对局结束/超时回收实例：发停止请求后<strong>回读</strong> <code>running=false</code> 才算释放；没确认的进 <code>release_pending</code>，reconciler 每轮重试并出指标，避免"以为停了还在计费"。</td><td><span class="badge ok">✅</span>（真机 ~2s）</td><td>spec 0015</td></tr>
+<tr><td>—</td><td>PostgreSQL</td><td>14 张表的唯一持久层；每个领域<strong>两套实现</strong>（内存 / SQL），由等价性测试对齐。迁移 append-only + checksum 防篡改。</td><td><span class="badge ok">✅</span></td><td><code>db/</code> · spec 0002/0005</td></tr>
+<tr><td>—</td><td>Prometheus</td><td>抓 <code>/metrics</code>：请求计数、回收积压、scope 拒绝。告警规则 1 条已写（回收卡住 15 分钟），其余 4 条仍在文档里。</td><td><span class="badge mid">🟡</span></td><td><code>deploy/prometheus/</code> · rule 95</td></tr>
+</tbody>
+</table>
+
+<h2>3. 结算扇出（钱的那条路）</h2>
+<div class="dgm">
+<svg viewBox="0 0 1060 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="结算扇出图">
+  <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#4a5568"/></marker></defs>
+
+  <rect x="20" y="110" width="170" height="80" rx="9" fill="#fff" stroke="#1a7f4b"/>
+  <text x="36" y="138" font-size="13" font-weight="600">DS 权威战报</text>
+  <text x="36" y="158" font-size="12" fill="#5b6472">result_id 幂等</text>
+  <text x="36" y="176" font-size="12" fill="#5b6472">双凭证</text>
+
+  <rect x="230" y="110" width="180" height="80" rx="9" fill="#fff" stroke="#2d5cff"/>
+  <text x="246" y="138" font-size="13" font-weight="600">submit_result</text>
+  <text x="246" y="158" font-size="12" fill="#5b6472">校验 + 状态机</text>
+  <text x="246" y="176" font-size="12" fill="#5b6472">同 result 重放=不重复</text>
+
+  <rect x="450" y="110" width="170" height="80" rx="9" fill="#eef2ff" stroke="#2d5cff" stroke-width="1.6"/>
+  <text x="466" y="138" font-size="13" font-weight="600">一个数据库事务</text>
+  <text x="466" y="158" font-size="12" fill="#5b6472">全成功才提交</text>
+  <text x="466" y="176" font-size="12" fill="#5b6472">ADR 0007</text>
+
+  <rect x="670" y="26" width="330" height="44" rx="8" fill="#fff" stroke="#d8dde6"/>
+  <text x="686" y="54" font-size="13">战报存档（头 + 每人明细）</text>
+  <rect x="670" y="86" width="330" height="44" rx="8" fill="#fff" stroke="#d8dde6"/>
+  <text x="686" y="114" font-size="13">progress：经验 + 幂等流水</text>
+  <rect x="670" y="146" width="330" height="44" rx="8" fill="#fff" stroke="#d8dde6"/>
+  <text x="686" y="174" font-size="13">economy：钱包 + 账本流水</text>
+  <rect x="670" y="206" width="330" height="44" rx="8" fill="#fff" stroke="#d8dde6"/>
+  <text x="686" y="234" font-size="13">rank：评分 + MMR 事件</text>
+  <rect x="670" y="258" width="330" height="30" rx="8" fill="#f5f7fb" stroke="#d8dde6"/>
+  <text x="686" y="278" font-size="13">sessions.state = finished</text>
+
+  <path d="M 190 150 L 226 150" stroke="#4a5568" stroke-width="1.6" fill="none" marker-end="url(#a2)"/>
+  <path d="M 410 150 L 446 150" stroke="#4a5568" stroke-width="1.6" fill="none" marker-end="url(#a2)"/>
+  <path d="M 620 140 C 650 60 660 48 666 48" stroke="#4a5568" stroke-width="1.4" fill="none" marker-end="url(#a2)"/>
+  <path d="M 620 148 C 652 108 658 108 666 108" stroke="#4a5568" stroke-width="1.4" fill="none" marker-end="url(#a2)"/>
+  <path d="M 620 152 L 666 168" stroke="#4a5568" stroke-width="1.4" fill="none" marker-end="url(#a2)"/>
+  <path d="M 620 160 C 650 214 658 228 666 228" stroke="#4a5568" stroke-width="1.4" fill="none" marker-end="url(#a2)"/>
+  <path d="M 620 172 C 648 262 656 273 666 273" stroke="#4a5568" stroke-width="1.4" fill="none" marker-end="url(#a2)"/>
+</svg>
+</div>
+<p class="cap">扇出全部成功才把会话置 <code>finished</code>；任何一步失败 → 503，调用方用<strong>同一个</strong> <code>result_id</code> 重试，每个下游按幂等键去重。</p>
+
+<h2>4. 一局对局的 10 步</h2>
+<table>
+<thead><tr><th>#</th><th>动作</th><th>谁做</th><th>关键约束</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>设备登录换 Nakama session</td><td>客户端</td><td>身份只来自 Nakama</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>2</td><td>RPC login 换后端 player_id + token</td><td>Nakama → 后端</td><td>服务凭证调 <code>account.login</code>（scope: account）</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>3</td><td>入队 → worker pop → <code>session.create</code></td><td>客户端 / 后端</td><td>一个 match 只允许一场会话</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>4</td><td>申请实例并注入 env</td><td>后端 → 厂商</td><td>先有 <code>RUNTIME_TOKEN</code> 才能申请</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>5</td><td>DS 报 ready（带真实监听地址）</td><td>DS</td><td>双凭证；重复 ready 幂等</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>6</td><td>票据 → match_id → by-match 拿地址</td><td>客户端</td><td>只有名单内玩家可读，且不含凭证</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>7</td><td>UDP 握手（参考 DS 回声）</td><td>客户端 ↔ DS</td><td>双向证据：发 N 收 N</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>8</td><td>上报权威战报</td><td>DS</td><td><code>result_id</code> 先落盘再上报；409=另一份结果</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>9</td><td>单事务扇出 → 会话 finished</td><td>后端</td><td>全成功才提交，失败可用同 id 重试</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>10</td><td>释放实例 + 回读确认</td><td>后端 → 厂商</td><td>未确认 → <code>release_pending</code> + 重试 + 指标</td><td><span class="badge ok">✅</span></td></tr>
+</tbody>
+</table>
+
+<h2>5. 代码结构与"每个包负责什么"</h2>
+<div class="tree">
+<ul>
+  <li><strong>cmd/platform</strong> — 单进程入口：读环境 → 装配 → 起 HTTP。<span class="badge ok">✅</span>
+    <ul>
+      <li><strong>platform/</strong> — 装配层：把 7 个服务挂到同一路由；结算扇出（sink）与 reconciler（超时清扫 + 回收重试 + 指标）也在这里。
+        <em>它不实现业务规则，只负责接线与跨域事务。</em> <span class="badge ok">✅</span></li>
+      <li><strong>services/*（7 个）</strong> — 每个领域一个包：DTO + Store 接口 + 内存实现 + Postgres 实现 + 路由注册 + 单测。
+        <ul>
+          <li>account — 玩家档案与身份兑换 <span class="badge ok">✅</span></li>
+          <li>team — 队伍与成员（一人一队、单 owner）<span class="badge ok">✅</span></li>
+          <li>matchmaking — 票据、MMR 快照、pop 组局 <span class="badge ok">✅</span></li>
+          <li>session — 会话状态机、分配、双凭证、战报入口 <span class="badge ok">✅</span></li>
+          <li>progress — 经验与等级（幂等流水）<span class="badge ok">✅</span></li>
+          <li>economy — 钱包与账本（余额不足、幂等入账）<span class="badge ok">✅</span></li>
+          <li>rank — 评分、MMR 事件、排行榜 <span class="badge ok">✅</span></li>
+        </ul>
+      </li>
+      <li><strong>pkg/</strong> — 基础设施，不含业务：
+        <ul>
+          <li>api — 接口契约声明（Op/Shape）→ 生成 OpenAPI <span class="badge ok">✅</span></li>
+          <li>apierr — 唯一错误模型（code ↔ HTTP 状态）<span class="badge ok">✅</span></li>
+          <li>httpx — 路由、鉴权（玩家/服务凭证 + scope）、指标、健康检查 <span class="badge ok">✅</span></li>
+          <li>battlealloc — 分配抽象：local / edgegap ✅，gamelift / agones ⬜</li>
+          <li>config / logx / pg — 环境配置、结构化日志、驱动 <span class="badge ok">✅</span></li>
+        </ul>
+      </li>
+      <li><strong>ds/</strong> — 参考 Dedicated Server（Go，不是 UE5 构建）：环境契约 + 幂等结算的可执行版本 <span class="badge ok">✅</span></li>
+      <li><strong>clients/minimal</strong> — 客户端协议模型，<code>CLIENT_FULL=1</code> 会真连战斗服 <span class="badge ok">✅</span></li>
+      <li><strong>db/</strong> — 迁移（append-only）+ 约束断言 <span class="badge ok">✅</span></li>
+      <li><strong>deploy/</strong> — dev/prod compose、systemd 单元、prometheus 规则 <span class="badge mid">🟡 未上真机</span></li>
+      <li><strong>.harness/</strong> — 规则、规格、ADR：这个仓库的"决策记录" <span class="badge ok">✅</span></li>
+    </ul>
+  </li>
+</ul>
+</div>
+<p class="cap">契约链路：<code>api.Op</code> 反射 → <code>tools/apigen</code> → <code>api/openapi/*.json</code> → CI 用 <code>apigen -check</code> 拦住"改了代码没重新生成"。</p>
+
+<h2>6. 数据模型（14 张表）</h2>
+<table>
+<thead><tr><th>领域</th><th>表</th><th>存什么</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>account</td><td><code>players</code></td><td>后端玩家档案；<code>external_id</code> 唯一（= Nakama 用户）</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>team</td><td><code>teams</code>, <code>team_members</code></td><td>队伍与成员角色；一人一队、单 owner</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>matchmaking</td><td><code>tickets</code></td><td>排队票据 + 入队时 MMR 快照（不由客户端给）</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>session</td><td><code>sessions</code>, <code>session_players</code>, <code>match_results</code>, <code>match_player_results</code></td><td>会话状态机、参战名单、权威战报与每人明细、回收待重试标记</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>progress</td><td><code>player_progress</code>, <code>progress_grants</code></td><td>累计经验/等级 + 幂等入账流水</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>economy</td><td><code>wallets</code>, <code>ledger_entries</code></td><td>余额（非负约束）+ 账本流水（幂等键唯一）</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>rank</td><td><code>ratings</code>, <code>mmr_events</code></td><td>评分与变更事件（可回溯为什么涨）</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>记账</td><td><code>schema_migrations</code></td><td>已应用迁移 + sha256；改旧迁移会被拒</td><td><span class="badge ok">✅</span></td></tr>
+</tbody>
+</table>
+
+<h2>7. 安全与凭证</h2>
+<div class="grid g3">
+  <div class="card okc"><h4>玩家身份 <span class="badge ok">✅</span></h4>
+    <ul><li>Nakama 发会话，后端签发自己的玩家 token（<code>iss=gamebackend</code>）</li>
+    <li>登录口只对服务开放，客户端不能自报身份（ADR 0010）</li></ul></div>
+  <div class="card okc"><h4>DS 双凭证 <span class="badge ok">✅</span></h4>
+    <ul><li>服务 token = 进程身份</li>
+    <li><code>X-Session-Token</code> = 这一场的身份</li>
+    <li>缺一个 401；只写长度不写值进日志</li></ul></div>
+  <div class="card okc"><h4>轮换 <span class="badge ok">✅</span></h4>
+    <ul><li>多凭证并行，日志 <code>caller=</code> 指认调用方</li>
+    <li>四步零停机：加 → 验 → 迁 → 删</li></ul></div>
+  <div class="card okc"><h4>最小权限 <span class="badge ok">✅</span></h4>
+    <ul><li><code>name=token:account</code>：只能调声明的服务</li>
+    <li>越权 403（不是 401）；默认拒绝；拼错 scope 启动失败</li>
+    <li>观察模式 + 计数判据，再切强制</li></ul></div>
+  <div class="card midc"><h4>mTLS / 短期凭证 <span class="badge todo">⬜</span></h4>
+    <ul><li>scope 解决"能做什么"，不解决"凭证长期有效"</li></ul></div>
+  <div class="card midc"><h4>UE5 引擎侧 <span class="badge todo">⬜</span></h4>
+    <ul><li>DS 与客户端在引擎里都未构建；协议已由 <code>ds/</code> 与 <code>clients/minimal</code> 钉住</li></ul></div>
+</div>
+
+<h2>8. 可观测性</h2>
+<table>
+<thead><tr><th>能力</th><th>内容</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>结构化日志</td><td><code>time/level/msg/service/env</code> + 每请求一行：<code>request_id</code>、<code>op</code>、<code>op_service</code>、<code>caller</code>、<code>status</code>、<code>duration_ms</code></td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>请求指标</td><td><code>backend_requests_total{service,op,status}</code>、<code>backend_start_time_seconds</code></td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>回收指标</td><td><code>backend_release_pending_sessions</code>、<code>..._max_attempts</code>、<code>..._oldest_pending_seconds</code>、<code>..._failed_total</code>、<code>..._confirmed_total</code></td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>Scope 指标</td><td><code>backend_service_scope_denied_total</code>（强制模式）、<code>backend_service_scope_would_deny_total</code>（观察模式）</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>告警规则</td><td>1 条：<code>backend_release_pending_sessions &gt; 0 for 15m</code>（回收卡住）；其余 4 条（5xx&gt;1%、分配卡住、僵尸对局、经济 internal）仍在文档里</td><td><span class="badge mid">🟡</span></td></tr>
+<tr><td>健康检查</td><td><code>/healthz</code> 只证明进程活着；<code>/readyz</code> 才查依赖</td><td><span class="badge ok">✅</span></td></tr>
+</tbody>
+</table>
+
+<h2>9. CI：8 个 job</h2>
+<table>
+<thead><tr><th>job</th><th>验证什么</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td><code>verify</code></td><td>gofmt / vet / build / <code>go test -race</code>（含真库等价性）/ schema 断言 / 契约漂移</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><code>image</code></td><td>后端镜像构建、非 root、探活、/metrics 可用</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><code>compose</code></td><td>postgres + backend 起栈、迁移、41 条断言、断言一次登录真的落库</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><code>nakama-module</code></td><td>Lua 模块在真实 Nakama 里注册成功</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><code>nakama</code></td><td>设备登录 → RPC → 后端读取；以及客户端用 Nakama 身份打完整一局</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><code>ops</code></td><td>迁移幂等 / append-only、备份恢复到新库、pg 客户端版本护栏</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><code>ds</code></td><td>DS 镜像、缺 token 拒绝启动、容器/进程各打一局、崩溃重启只结算一次、dev 身份完整对局</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><code>release</code></td><td>后端 + DS 镜像推送 ghcr 并回拉探活</td><td><span class="badge ok">✅</span></td></tr>
+</tbody>
+</table>
+
+<h2>10. 未来需要实现的功能（按优先级）</h2>
+<h3>现在该做的</h3>
+<table>
+<thead><tr><th>#</th><th>功能</th><th>为什么现在做</th><th>完成判据</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Prometheus 真正接入（5 条告警落地）</td><td>指标有了没告警 = 只能事后看日志</td><td>规则加载成功 + 造一次假告警能触发</td><td><span class="badge mid">🟡</span></td></tr>
+<tr><td>2</td><td>计费对账（释放时刻 vs 停计费时刻）</td><td>回收已实测，但"不再计费"没验过</td><td>一次对账数字对齐</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>3</td><td>Edgegap <code>env_vars</code> 复验（用自有 DS 镜像分配一次）</td><td>机制在本地/CI 容器验过，厂商侧注入未验</td><td>container logs 出现 <code>runtime_token=present(len=N)</code></td><td><span class="badge todo">⬜</span></td></tr>
+</tbody>
+</table>
+
+<h3>里程碑与明确未实现项</h3>
+<table>
+<thead><tr><th>项</th><th>说明</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>M2 真实托管分配器闭环</td><td>还缺计费对账、GameLift/Agones 适配器、多实例 reconciler 选主</td><td><span class="badge mid">🟡 主体已通</span></td></tr>
+<tr><td>M3 Nakama 落地</td><td>链路已通；还缺 UE5 客户端实现（协议已验证，C++ 未编译）</td><td><span class="badge mid">🟡</span></td></tr>
+<tr><td>M4 服务拆分</td><td>rank/matchmaking 独立进程、进程内 sink 换消息总线、mTLS/短期令牌</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>M5 可观测与容量</td><td>Prometheus 接入、压测、SLO、5 条告警</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>UE5 Dedicated Server</td><td>环境契约 + 双凭证 + <code>result_id</code> 幂等已定，二进制未建</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>UE5 客户端</td><td><code>docs/ue5-client-model.md</code> 的 C++ 是形状指引，未在引擎里编译</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>GameLift / Agones 适配器</td><td>照 <code>edgegap.go</code> 结构写，契约测试用假服务</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>DS 掉线重连</td><td>需要 DS 侧保存每局连接状态</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>战报 schema 版本号</td><td>加 <code>schema_version</code> 字段</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>反作弊（异常战报检测）</td><td>现在是"谁能提交 + 提交什么"的边界，不是行为分析</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>生产数据库运维</td><td>备份/复制/连接池/密码策略；脚本有，真机没跑过</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>生产部署本身</td><td>systemd、TLS 反代、磁盘水位、跨机恢复</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>mTLS / 短期凭证</td><td>替代长期共享密钥</td><td><span class="badge todo">⬜</span></td></tr>
+</tbody>
+</table>
+
+<footer>
+  <p>事实来源（按优先级）：代码 &gt; <code>api/openapi/*.json</code>（生成物）&gt; <code>.harness/specs</code> 与 ADR &gt; 本页与 <code>docs/architecture-map.md</code>。</p>
+  <p>本页是 <code>docs/architecture-map.md</code> 的可视化版本；两者不一致时先修 Markdown，再同步此页。生成于 2026-11-01。</p>
+</footer>
+
+</main>
+</body>
+</html>
