@@ -61,7 +61,8 @@ make verify                       # Linux / CI
 
 | 角色 | 入口 |
 |---|---|
-| **先看整体** | `docs/architecture-map.html`（浏览器打开，带图的标注版）或 `docs/architecture-map.md`：部署 / 对局时序 / 模块 / 结算 + 未来功能，**逐项标注 ✅已验证 / 🟡已实现未验证 / ⬜未实现** |
+| **先看整体** | `docs/architecture-map.html`（浏览器打开）：现在长什么样，每个环节做什么，**逐项标注 ✅已验证 / 🟡已实现未验证 / ⬜未实现**；Markdown 源 `docs/architecture-map.md` |
+| **看还剩什么** | `docs/roadmap.html`：三条并行主线、现在就能做的三项（含判据）、里程碑 M2–M5、未实现清单、已关闭清单；Markdown 源 `docs/roadmap.md` |
 | AI Agent | `AGENTS.md` -> `.harness/rules/00-global.md` -> 其余规则按编号 |
 | 新人 | 本文件 -> `docs/architecture-map.md`（图）-> `docs/architecture.md`（细节）-> `docs/runbook-local-dev.md` |
 | 改接口的人 | `docs/api-contract.md` + `.harness/rules/30-api-contract.md` |

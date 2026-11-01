@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gamebackend 路线图（带标注）</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --card:#fff; --ink:#1f2430; --muted:#5b6472; --line:#d8dde6;
+    --ok:#1a7f4b; --mid:#a86b00; --todo:#8a8f98; --accent:#2d5cff;
+    --okbg:#e7f6ee; --midbg:#fdf3e0; --todobg:#eef0f3;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px 20px 80px;background:var(--bg);color:var(--ink);
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+  main{max-width:1180px;margin:0 auto}
+  h1{font-size:26px;margin:0 0 6px}
+  h2{font-size:20px;margin:42px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--line)}
+  h3{font-size:16px;margin:24px 0 8px}
+  p.lead{color:var(--muted);margin:0 0 14px}
+  code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;
+    background:#eef1f6;padding:1px 5px;border-radius:4px}
+  table{border-collapse:collapse;width:100%;margin:10px 0 18px;background:var(--card);
+    box-shadow:0 1px 2px rgba(20,30,50,.06);border-radius:8px;overflow:hidden}
+  th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top;font-size:14px}
+  th{background:#f0f3f8;font-weight:600;white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  .badge{display:inline-block;font-size:12px;padding:1px 7px;border-radius:999px;white-space:nowrap;font-weight:600}
+  .ok{background:var(--okbg);color:var(--ok)}
+  .mid{background:var(--midbg);color:var(--mid)}
+  .todo{background:var(--todobg);color:var(--todo)}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin:8px 0 0;color:var(--muted);font-size:13px}
+  .dgm{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;margin:12px 0 6px;overflow-x:auto}
+  .dgm svg{display:block;min-width:960px;width:100%;height:auto}
+  .cap{color:var(--muted);font-size:13px;margin:0 0 22px}
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .card{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);
+    border-radius:8px;padding:12px 14px;box-shadow:0 1px 2px rgba(20,30,50,.05)}
+  .card h4{margin:0 0 6px;font-size:15px;display:flex;justify-content:space-between;gap:10px;align-items:center}
+  .card dl{margin:6px 0 0;font-size:14px}
+  .card dt{color:var(--muted);font-size:12.5px;margin-top:6px}
+  .card dd{margin:0}
+  .chips{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0 6px}
+  .chip{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:6px 14px;font-size:13.5px}
+  .note{background:#eef2ff;border-left:4px solid var(--accent);border-radius:8px;padding:12px 14px;margin:14px 0}
+  .note p{margin:0;font-size:14px}
+  footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+  @media print{
+    body{background:#fff;padding:0}
+    .dgm,.card,table{box-shadow:none}
+    h2{page-break-after:avoid}
+    tr{page-break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>gamebackend 路线图（带标注）</h1>
+<p class="lead">
+  还剩什么没做、为什么现在做、被什么卡住。三件事互不阻塞：<strong>观测与容量</strong>、
+  <strong>引擎内（UE5）</strong>、<strong>平台演进</strong>。架构现状见
+  <code>docs/architecture-map.html</code>。生成于 2026-11-01。
+</p>
+<div class="legend">
+  <span><span class="badge ok">✅ 已验证</span> CI 真跑或真机实跑，可复现</span>
+  <span><span class="badge mid">🟡 已实现未验证</span> 代码与测试在，缺真实环境或未接线</span>
+  <span><span class="badge todo">⬜ 未实现</span> 有设计/契约，没有代码</span>
+</div>
+
+<h2>1. 三条并行主线</h2>
+<div class="dgm">
+<svg viewBox="0 0 1120 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="三条并行主线">
+  <defs>
+    <marker id="r1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4a5568"/>
+    </marker>
+  </defs>
+
+  <!-- lane labels -->
+  <text x="18" y="68" font-size="14" font-weight="700" fill="#3b4a6b">A · 观测 → 容量</text>
+  <text x="18" y="208" font-size="14" font-weight="700" fill="#3b4a6b">B · 引擎内（两个二进制）</text>
+  <text x="18" y="348" font-size="14" font-weight="700" fill="#3b4a6b">C · 平台演进</text>
+
+  <!-- lane A -->
+  <rect x="170" y="30" width="200" height="64" rx="8" fill="#fff" stroke="#a86b00"/>
+  <text x="184" y="54" font-size="13" font-weight="600">A1 Prometheus 接上</text>
+  <text x="184" y="74" font-size="11.5" fill="#5b6472">抓 /metrics · 规则加载</text>
+  <rect x="400" y="30" width="200" height="64" rx="8" fill="#fff" stroke="#8a8f98" stroke-dasharray="5 4"/>
+  <text x="414" y="54" font-size="13" font-weight="600">A2 补齐 4 条告警</text>
+  <text x="414" y="74" font-size="11.5" fill="#5b6472">5xx / 分配卡住 / 僵尸局 / 经济</text>
+  <rect x="630" y="30" width="200" height="64" rx="8" fill="#fff" stroke="#8a8f98" stroke-dasharray="5 4"/>
+  <text x="644" y="54" font-size="13" font-weight="600">A3 压测</text>
+  <text x="644" y="74" font-size="11.5" fill="#5b6472">每场对局的 QPS/延迟/并发</text>
+  <rect x="860" y="30" width="200" height="64" rx="8" fill="#fff" stroke="#8a8f98" stroke-dasharray="5 4"/>
+  <text x="874" y="54" font-size="13" font-weight="600">A4 SLO 与容量决策</text>
+  <text x="874" y="74" font-size="11.5" fill="#5b6472">要几台、什么规格</text>
+
+  <!-- lane B -->
+  <rect x="170" y="170" width="200" height="64" rx="8" fill="#fff" stroke="#1a7f4b"/>
+  <text x="184" y="194" font-size="13" font-weight="600">B1 参考 DS（Go）</text>
+  <text x="184" y="214" font-size="11.5" fill="#5b6472">容器内已真打一局（spec 0012）</text>
+  <rect x="400" y="170" width="200" height="64" rx="8" fill="#fff" stroke="#8a8f98" stroke-dasharray="5 4"/>
+  <text x="414" y="194" font-size="13" font-weight="600">B2 UE5 Dedicated Server</text>
+  <text x="414" y="214" font-size="11.5" fill="#5b6472">替换二进制，契约不变</text>
+  <rect x="630" y="170" width="200" height="64" rx="8" fill="#fff" stroke="#8a8f98" stroke-dasharray="5 4"/>
+  <text x="644" y="194" font-size="13" font-weight="600">B3 UE5 客户端</text>
+  <text x="644" y="214" font-size="11.5" fill="#5b6472">登录/排队/连 DS/结算页</text>
+  <rect x="860" y="170" width="200" height="64" rx="8" fill="#fff" stroke="#8a8f98" stroke-dasharray="5 4"/>
+  <text x="874" y="194" font-size="13" font-weight="600">B4 真机联调</text>
+  <text x="874" y="214" font-size="11.5" fill="#5b6472">人真的在里面打一局</text>
+
+  <!-- lane C -->
+  <rect x="170" y="310" width="200" height="64" rx="8" fill="#fff" stroke="#8a8f98" stroke-dasharray="5 4"/>
+  <text x="184" y="334" font-size="13" font-weight="600">C1 mTLS / 短期凭证</text>
+  <text x="184" y="354" font-size="11.5" fill="#5b6472">替代长期共享密钥</text>
+  <rect x="400" y="310" width="200" height="64" rx="8" fill="#fff" stroke="#8a8f98" stroke-dasharray="5 4"/>
+  <text x="414" y="334" font-size="13" font-weight="600">C2 M4 服务拆分</text>
+  <text x="414" y="354" font-size="11.5" fill="#5b6472">rank/matchmaking 独立进程</text>
+  <rect x="630" y="310" width="200" height="64" rx="8" fill="#fff" stroke="#8a8f98" stroke-dasharray="5 4"/>
+  <text x="644" y="334" font-size="13" font-weight="600">C3 sink 换消息总线</text>
+  <text x="644" y="354" font-size="11.5" fill="#5b6472">结算扇出跨进程</text>
+  <rect x="860" y="310" width="200" height="64" rx="8" fill="#fff" stroke="#8a8f98" stroke-dasharray="5 4"/>
+  <text x="874" y="334" font-size="13" font-weight="600">C4 多实例选主</text>
+  <text x="874" y="354" font-size="11.5" fill="#5b6472">单进程时无意义</text>
+
+  <!-- arrows -->
+  <path d="M 372 62 L 396 62" stroke="#4a5568" stroke-width="1.5" fill="none" marker-end="url(#r1)"/>
+  <path d="M 602 62 L 626 62" stroke="#4a5568" stroke-width="1.5" fill="none" marker-end="url(#r1)"/>
+  <path d="M 832 62 L 856 62" stroke="#4a5568" stroke-width="1.5" fill="none" marker-end="url(#r1)"/>
+  <path d="M 372 202 L 396 202" stroke="#4a5568" stroke-width="1.5" fill="none" marker-end="url(#r1)"/>
+  <path d="M 602 202 L 626 202" stroke="#4a5568" stroke-width="1.5" fill="none" marker-end="url(#r1)"/>
+  <path d="M 832 202 L 856 202" stroke="#4a5568" stroke-width="1.5" fill="none" marker-end="url(#r1)"/>
+  <path d="M 372 342 L 396 342" stroke="#4a5568" stroke-width="1.5" fill="none" marker-end="url(#r1)"/>
+  <path d="M 602 342 L 626 342" stroke="#4a5568" stroke-width="1.5" fill="none" marker-end="url(#r1)"/>
+  <path d="M 832 342 L 856 342" stroke="#4a5568" stroke-width="1.5" fill="none" marker-end="url(#r1)"/>
+
+  <text x="170" y="440" font-size="12.5" fill="#5b6472">三条线互不阻塞：A 卡在“有没有机器”时，B 可以继续写引擎代码；C 只在前端真的要多实例时才需要。</text>
+</svg>
+</div>
+<p class="cap">箭头 = 先后顺序（不是工期）。虚线框 = 未实现；实线绿 = 已验证；实线黄 = 已实现未验证。</p>
+
+<h2>2. 现在就能做、不被任何外部条件阻塞</h2>
+<div class="chips">
+  <span class="chip"><span class="badge todo">⬜</span> Edgegap <code>env_vars</code> 复验 —— 镜像已发布，只需分配一次</span>
+  <span class="chip"><span class="badge todo">⬜</span> 计费对账 —— 需厂商账单访问</span>
+  <span class="chip"><span class="badge mid">🟡</span> Prometheus 接上 —— 只需一台机器</span>
+</div>
+
+<h3>每一项的判据</h3>
+<div class="grid g2">
+  <div class="card"><h4>Edgegap <code>env_vars</code> 复验 <span class="badge todo">⬜</span></h4>
+    <dl>
+      <dt>为什么现在做</dt><dd>本地/CI 容器已证明"凭证能进实例"，但厂商侧注入没在 Edgegap 上验过；镜像 `:&lt;sha&gt;-ds` 已经发布。</dd>
+      <dt>完成判据</dt><dd>container logs 出现 <code>runtime_token=present(len=N)</code>，且 N 与后端发出的令牌等长。</dd>
+    </dl></div>
+  <div class="card"><h4>计费对账 <span class="badge todo">⬜</span></h4>
+    <dl>
+      <dt>为什么现在做</dt><dd>回收已实测（停止 → <code>running=false</code> ~2s），但"不再计费"没验过，这是钱的最后一段。</dd>
+      <dt>完成判据</dt><dd>一次释放的计费停止时刻与 <code>running=false</code> 对齐；`/v1/deployments` 的 `total_count` 归零。</dd>
+    </dl></div>
+  <div class="card"><h4>Prometheus 接上 <span class="badge mid">🟡</span></h4>
+    <dl>
+      <dt>为什么现在做</dt><dd>指标已经在 <code>/metrics</code> 上，但没有采集方；规则文件只有 1 条，等于只有事后看日志。</dd>
+      <dt>完成判据</dt><dd>规则加载成功（<code>promtool check rules</code> 通过），人为触发一次能被路由到告警。</dd>
+    </dl></div>
+  <div class="card"><h4>补齐剩下 4 条告警 <span class="badge todo">⬜</span></h4>
+    <dl>
+      <dt>为什么</dt><dd><code>rules/95</code> 写了 5 件事该告警，现在只落地 1 条（回收卡住）。</dd>
+      <dt>完成判据</dt><dd>5xx 比例、分配卡住、僵尸对局、经济 internal 各一条规则，且都能被触发。</dd>
+    </dl></div>
+</div>
+
+<h2>3. 里程碑</h2>
+<table>
+<thead><tr><th>阶段</th><th>目标</th><th>还缺什么</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>M2 真实托管分配器</td><td>分配 + 回收 + 对账闭环</td><td>计费对账、GameLift/Agones 适配器、多实例选主</td><td><span class="badge mid">🟡 主体已通</span></td></tr>
+<tr><td>M3 Nakama 落地</td><td>账号 / RPC / 客户端链路</td><td>UE5 客户端实现（协议已验证，C++ 未编译）</td><td><span class="badge mid">🟡</span></td></tr>
+<tr><td>M4 服务拆分</td><td>rank / matchmaking 独立进程</td><td>消息总线或 gRPC、mTLS 或短期令牌、sink 改造、选主</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>M5 可观测与容量</td><td>指标、压测、SLO</td><td>主线 A 的四步</td><td><span class="badge todo">⬜</span></td></tr>
+</tbody>
+</table>
+
+<h2>4. 明确未实现的技术项</h2>
+<table>
+<thead><tr><th>类别</th><th>项</th><th>说明</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>引擎</td><td>UE5 Dedicated Server</td><td>环境契约、双凭证、<code>result_id</code> 幂等都已定；二进制未建</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>引擎</td><td>UE5 客户端</td><td><code>docs/ue5-client-model.md</code> 的 C++ 是形状指引，未在引擎里编译</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>引擎</td><td>UE5 侧 CI（引擎构建）</td><td>需要引擎与许可，构建很重</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>厂商</td><td>GameLift / Agones 适配器</td><td>照 <code>pkg/battlealloc/edgegap.go</code> 结构写，契约测试用假服务</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>对局</td><td>DS 掉线重连</td><td>需要 DS 侧保存每局连接状态</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>对局</td><td>战报 <code>schema_version</code></td><td>加字段，便于以后兼容旧战报</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>对局</td><td>反作弊（异常战报检测）</td><td>现在是"谁能提交 + 提交什么"的边界，不是行为分析</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>平台</td><td>多实例 reconciler 单活选主</td><td>现在多实例会重复 Release（安全但费配额）</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>平台</td><td>进程内 sink 换消息总线</td><td>结算扇出跨进程后需要（配合 M4）</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>运维</td><td>生产数据库运维</td><td>备份/复制/连接池/密码策略；脚本有，真机没跑过</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>运维</td><td>生产部署本身</td><td>systemd、TLS 反代、磁盘水位、跨机恢复</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>安全</td><td>mTLS / 短期凭证</td><td>scope 解决"能做什么"，不解决"凭证长期有效"</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>安全</td><td>凭证越权告警</td><td>现在只有日志与计数，没有"某凭证被拒 N 次"的告警</td><td><span class="badge todo">⬜</span></td></tr>
+</tbody>
+</table>
+
+<h2>5. 已关闭（对照：成本与节奏参考）</h2>
+<table>
+<thead><tr><th>项</th><th>规格</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>登录收口 + 后端签发玩家 token</td><td>ADR 0010</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>自有 DS 镜像 + 每场凭证容器内验证</td><td>spec 0012</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>客户端对局闭环（by-match → UDP → 结算）</td><td>spec 0013</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>Edgegap 分配 + 回收回读（含真实时序实测）</td><td>spec 0015</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>凭证轮换（多凭证并行 + <code>caller=</code> 日志）</td><td>spec 0014</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>凭证最小权限（默认拒绝 + 覆盖性测试 + 观察期）</td><td>spec 0016</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>回收指标 + 1 条告警规则</td><td>spec 0015</td><td><span class="badge ok">✅</span></td></tr>
+</tbody>
+</table>
+
+<div class="note">
+  <p><strong>怎么更新这页</strong>：先改 <code>docs/roadmap.md</code>（源）与对应 spec 的「状态」行，
+  再同步本页。关闭一项时把它从"未实现 / 现在该做"移到「已关闭」，并写清规格编号——
+  <strong>没写规格的"完成"不算完成</strong>。</p>
+</div>
+
+<footer>
+  <p>事实来源优先级：代码 &gt; <code>api/openapi/*.json</code>（生成物）&gt; <code>.harness/specs</code> 与 ADR &gt; 本页。</p>
+  <p>配套页面：<code>docs/architecture-map.html</code>（当前架构）· <code>docs/roadmap.md</code>（本页的 Markdown 源）。</p>
+</footer>
+
+</main>
+</body>
+</html>

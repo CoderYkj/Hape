@@ -345,37 +345,16 @@
 </tbody>
 </table>
 
-<h2>10. 未来需要实现的功能（按优先级）</h2>
-<h3>现在该做的</h3>
-<table>
-<thead><tr><th>#</th><th>功能</th><th>为什么现在做</th><th>完成判据</th><th>状态</th></tr></thead>
-<tbody>
-<tr><td>1</td><td>Prometheus 真正接入（5 条告警落地）</td><td>指标有了没告警 = 只能事后看日志</td><td>规则加载成功 + 造一次假告警能触发</td><td><span class="badge mid">🟡</span></td></tr>
-<tr><td>2</td><td>计费对账（释放时刻 vs 停计费时刻）</td><td>回收已实测，但"不再计费"没验过</td><td>一次对账数字对齐</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>3</td><td>Edgegap <code>env_vars</code> 复验（用自有 DS 镜像分配一次）</td><td>机制在本地/CI 容器验过，厂商侧注入未验</td><td>container logs 出现 <code>runtime_token=present(len=N)</code></td><td><span class="badge todo">⬜</span></td></tr>
-</tbody>
-</table>
-
-<h3>里程碑与明确未实现项</h3>
-<table>
-<thead><tr><th>项</th><th>说明</th><th>状态</th></tr></thead>
-<tbody>
-<tr><td>M2 真实托管分配器闭环</td><td>还缺计费对账、GameLift/Agones 适配器、多实例 reconciler 选主</td><td><span class="badge mid">🟡 主体已通</span></td></tr>
-<tr><td>M3 Nakama 落地</td><td>链路已通；还缺 UE5 客户端实现（协议已验证，C++ 未编译）</td><td><span class="badge mid">🟡</span></td></tr>
-<tr><td>M4 服务拆分</td><td>rank/matchmaking 独立进程、进程内 sink 换消息总线、mTLS/短期令牌</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>M5 可观测与容量</td><td>Prometheus 接入、压测、SLO、5 条告警</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>UE5 Dedicated Server</td><td>环境契约 + 双凭证 + <code>result_id</code> 幂等已定，二进制未建</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>UE5 客户端</td><td><code>docs/ue5-client-model.md</code> 的 C++ 是形状指引，未在引擎里编译</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>GameLift / Agones 适配器</td><td>照 <code>edgegap.go</code> 结构写，契约测试用假服务</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>DS 掉线重连</td><td>需要 DS 侧保存每局连接状态</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>战报 schema 版本号</td><td>加 <code>schema_version</code> 字段</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>反作弊（异常战报检测）</td><td>现在是"谁能提交 + 提交什么"的边界，不是行为分析</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>生产数据库运维</td><td>备份/复制/连接池/密码策略；脚本有，真机没跑过</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>生产部署本身</td><td>systemd、TLS 反代、磁盘水位、跨机恢复</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>mTLS / 短期凭证</td><td>替代长期共享密钥</td><td><span class="badge todo">⬜</span></td></tr>
-</tbody>
-</table>
-
+<h2>10. 未来功能 → 独立路线图页</h2>
+<div class="card"><h4>已拆出：<code>docs/roadmap.html</code></h4>
+  <ul>
+    <li>三条并行主线：观测→容量 / 引擎内（UE5）/ 平台演进</li>
+    <li>现在就能做、不被外部条件阻塞的三项（含完成判据）</li>
+    <li>里程碑 M2–M5、13 项明确未实现、已关闭清单（对照）</li>
+  </ul>
+  <p style="margin:8px 0 0;color:#5b6472;font-size:13.5px">本页只讲<strong>现状</strong>；路线图只讲<strong>还剩什么</strong>，两页各自单一职责，避免同一张表在四处漂移。
+  方向感一句话：当前最该做的是 Prometheus 接入、计费对账、Edgegap <code>env_vars</code> 复验。</p>
+</div>
 <footer>
   <p>事实来源（按优先级）：代码 &gt; <code>api/openapi/*.json</code>（生成物）&gt; <code>.harness/specs</code> 与 ADR &gt; 本页与 <code>docs/architecture-map.md</code>。</p>
   <p>本页是 <code>docs/architecture-map.md</code> 的可视化版本；两者不一致时先修 Markdown，再同步此页。生成于 2026-11-01。</p>
