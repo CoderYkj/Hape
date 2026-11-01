@@ -3,7 +3,7 @@
 > 这份文档把「现在长什么样」和「还缺什么」画在一起，每个方框、每一行都带状态标注。
 > 代码是唯一事实来源；本文与代码不一致时以代码为准，并请顺手修正本文。
 >
-> 最后更新：2026-11-01（对应 spec 0015；spec 0016「凭证最小权限」进行中，未提交）
+> 最后更新：2026-11-01（对应 spec 0016：凭证最小权限已落地）
 
 ## 图例
 
@@ -182,7 +182,7 @@ graph TB
 | 登录收口 | ✅ | `account.login` 服务专属，客户端不能自报身份（ADR 0010） |
 | DS 双凭证 | ✅ | 服务 token（进程）+ 每场 `X-Session-Token`（会话）；缺一个就 401（spec 0008） |
 | 凭证轮换 | ✅ | `BACKEND_SERVICE_CREDENTIALS` 多凭证并行 + `caller=` 日志（spec 0014） |
-| **最小权限（scope）** | 🟡 | **进行中、未提交**：解析 `name=token:svc+svc`、Router 按 `op.Service` 403、`BACKEND_SERVICE_SCOPE_ENFORCE=false` 观察模式、未知 service 启动失败。缺：示例 env 的 scope、覆盖性测试、文档 |
+| **最小权限（scope）** | ✅ | 凭证声明可调 service（`name=token:svc+svc`，`*` 仅运维）；Router 按 `op.Service` 判定，越权 **403**（不是 401）；默认拒绝；拼错 scope 启动失败；`BACKEND_SERVICE_SCOPE_ENFORCE=false` 观察模式；覆盖性测试盯住示例 env。spec 0016 |
 | mTLS / 短期令牌 | 🔜 | M4 |
 
 ---
@@ -226,15 +226,15 @@ graph TB
 | Edgegap 分配 + 回收回读（含真实时序） | ✅ spec 0015 |
 | 凭证轮换 | ✅ spec 0014 |
 | 回收指标 + 告警规则 | ✅ spec 0015 |
+| 凭证最小权限（scope） | ✅ spec 0016 |
 
 ### 现在该做的（顺序即建议）
 
 | # | 功能 | 为什么现在做 | 依赖 | 完成判据 | 状态 |
 |---|---|---|---|---|---|
-| 1 | **凭证 scope 收尾**：示例 env 加 scope、覆盖性测试、log-only 观察期文档 | 代码已写但未提交；缺文档/示例就上线会全量 403 | 无 | CI 绿 + `would-deny` 在观察期归零 | 🟡 进行中 |
-| 2 | **Prometheus 真正接入**：5 条告警规则落地（当前只有 1 条文件） | 指标有了没告警=只有事后看日志 | 一台能跑 Prometheus 的机器 | 规则加载成功，制造一次假告警能被触发 | 🟡 |
-| 3 | **计费对账**：释放时刻 vs 计费停止时刻 | 回收已实测，但"不再计费"没验过；这是钱的最后一段 | 厂商账单 API/控制台 | 一次对账数字对齐 | ⬜ |
-| 4 | **Edgegap `env_vars` 复验**：用自有 DS 镜像在 Edgegap 分配一次 | 本地/CI 容器验证了机制，厂商侧注入未验 | 已发布的 `:<sha>-ds` 镜像 | container logs 出现 `runtime_token=present(len=N)` | ⬜ |
+| 1 | **Prometheus 真正接入**：5 条告警规则落地（当前只有 1 条文件） | 指标有了没告警=只有事后看日志 | 一台能跑 Prometheus 的机器 | 规则加载成功，制造一次假告警能被触发 | 🟡 文件在、未接线 |
+| 2 | **计费对账**：释放时刻 vs 计费停止时刻 | 回收已实测，但"不再计费"没验过；这是钱的最后一段 | 厂商账单 API/控制台 | 一次对账数字对齐 | ⬜ |
+| 3 | **Edgegap `env_vars` 复验**：用自有 DS 镜像在 Edgegap 分配一次 | 本地/CI 容器验证了机制，厂商侧注入未验 | 已发布的 `:<sha>-ds` 镜像 | container logs 出现 `runtime_token=present(len=N)` | ⬜ |
 
 ### 里程碑路线（README 口径）
 

@@ -50,6 +50,9 @@ type Config struct {
 	// AllocatorOverride replaces the provider built from Allocator. Tests use it to
 	// script a provider that fails to release; production has no reason to.
 	AllocatorOverride battlealloc.Allocator
+	// ObserveServiceScopes disables scope enforcement but keeps the log lines. Used to
+	// validate a scope policy against real traffic before it starts refusing calls.
+	ObserveServiceScopes bool
 	// JWTKey is Nakama's session encryption key. Required when DevAuth is false.
 	JWTKey string
 	// JWTIssuer, when set, is checked against the token's `iss`.
@@ -202,13 +205,24 @@ func New(cfg Config) (*Platform, error) {
 	// One credential set for both authenticators: dev and production must not disagree
 	// about which tokens are valid, or a rotation would be verified in the wrong mode.
 	creds := cfg.ServiceCredentials
+	// The legacy single-token paths are unscoped by construction. That is a property of
+	// the variable, not a loophole: the only way to get least privilege is to declare
+	// scopes in BACKEND_SERVICE_CREDENTIALS.
 	if len(creds) == 0 && cfg.ServiceToken != "" {
-		creds = httpx.ServiceCredentials{{Name: httpx.LegacyServiceCredentialName, Token: cfg.ServiceToken}}
+		creds = httpx.ServiceCredentials{{
+			Name:     httpx.LegacyServiceCredentialName,
+			Token:    cfg.ServiceToken,
+			Services: []string{httpx.AllServices},
+		}}
 	}
 	if len(creds) == 0 && cfg.DevAuth {
 		// Dev stays zero-configuration: `go run ./cmd/platform` and every local tool
 		// share dev-service, exactly as before credentials became a set.
-		creds = httpx.ServiceCredentials{{Name: httpx.LegacyServiceCredentialName, Token: httpx.DevServiceToken}}
+		creds = httpx.ServiceCredentials{{
+			Name:     httpx.LegacyServiceCredentialName,
+			Token:    httpx.DevServiceToken,
+			Services: []string{httpx.AllServices},
+		}}
 	}
 	// Empty is not "invalid" here: the authenticator below reports the missing
 	// credential in the vocabulary of the mode it is building (a JWT verifier without a
@@ -221,7 +235,7 @@ func New(cfg Config) (*Platform, error) {
 	if auth == nil {
 		if cfg.DevAuth {
 			auth = httpx.NewDevAuthWithCredentials(creds)
-			log.Info("auth selected", "mode", "dev", "service_credentials", creds.Names())
+			log.Info("auth selected", "mode", "dev", "service_credentials", creds.Describe())
 		} else {
 			// A deployment that wants player tokens signed with a different key than
 			// Nakama's can set BACKEND_PLAYER_JWT_KEY; by default one key signs both and
@@ -258,10 +272,14 @@ func New(cfg Config) (*Platform, error) {
 				return nil, fmt.Errorf("platform: production authenticator: %w", err)
 			}
 			auth = jwtAuth
-			log.Info("auth selected", "mode", "jwt", "service_credentials", creds.Names())
+			log.Info("auth selected", "mode", "jwt", "service_credentials", creds.Describe())
 		}
 	}
 	router := httpx.NewRouter("platform", log, auth)
+	if cfg.ObserveServiceScopes {
+		router.SetScopeEnforcement(false)
+		log.Warn("service scopes are OBSERVED, not enforced: out-of-scope calls succeed and are logged")
+	}
 	p.router = router
 	p.metrics = router.Metrics()
 
@@ -290,6 +308,18 @@ func New(cfg Config) (*Platform, error) {
 	p.Economy.Register(router)
 	p.Rank.Register(router)
 	router.Health(p.ready)
+
+	// A scope naming a service this process does not serve is always a typo, and a typo
+	// here makes the credential silently unable to call the thing it was meant to. Check
+	// it once every op is registered.
+	known := map[string]bool{}
+	for _, service := range api.Services(p.router.Ops()) {
+		known[service] = true
+	}
+	if unknown := creds.UnknownServices(known); len(unknown) > 0 {
+		return nil, fmt.Errorf("platform: service credentials name unknown services: %v (known: %v)",
+			unknown, api.Services(p.router.Ops()))
+	}
 
 	return p, nil
 }

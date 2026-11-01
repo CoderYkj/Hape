@@ -153,8 +153,10 @@ func TestDevAuthAcceptsARotatingCredentialSet(t *testing.T) {
 		DevAuth:   true,
 		Allocator: "local",
 		ServiceCredentials: httpx.ServiceCredentials{
-			{Name: "dev-old", Token: "dev-old-secret"},
-			{Name: "dev-new", Token: "dev-new-secret"},
+			// Wildcard scopes: this test is about rotation, and an empty scope now means
+			// "may call nothing" (fail closed), so it would fail for the wrong reason.
+			{Name: "dev-old", Token: "dev-old-secret", Services: []string{httpx.AllServices}},
+			{Name: "dev-new", Token: "dev-new-secret", Services: []string{httpx.AllServices}},
 		},
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
@@ -179,5 +181,58 @@ func TestDevAuthAcceptsARotatingCredentialSet(t *testing.T) {
 		map[string]any{"external_id": "rotating-stranger"}, "dev-service")
 	if status != http.StatusUnauthorized {
 		t.Fatalf("unconfigured token = %d, want 401", status)
+	}
+}
+
+// TestServiceScopeIsEnforcedPerService is the least-privilege contract end to end: a
+// credential scoped to `account` can exchange identities and nothing else, and the refusal
+// is 403 rather than 401 - the credential is real, the action is not allowed, and those two
+// mean different things to whoever is on call.
+func TestServiceScopeIsEnforcedPerService(t *testing.T) {
+	scoped := httpx.ServiceCredentials{
+		{Name: "nakama", Token: "nakama-secret", Services: []string{"account"}},
+	}
+	newServer := func(t *testing.T, observe bool) string {
+		t.Helper()
+		app, err := platform.New(platform.Config{
+			Env:                  "dev",
+			DevAuth:              true,
+			Allocator:            "local",
+			ServiceCredentials:   scoped,
+			ObserveServiceScopes: observe,
+			Logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
+		})
+		if err != nil {
+			t.Fatalf("platform.New: %v", err)
+		}
+		t.Cleanup(func() { _ = app.Close() })
+		server := httptest.NewServer(app.Handler())
+		t.Cleanup(server.Close)
+		return server.URL
+	}
+
+	enforced := newServer(t, false)
+	status, _ := doJSON(t, enforced, http.MethodPost, "/v1/account/sessions",
+		map[string]any{"external_id": "scoped-player"}, "nakama-secret")
+	if status != http.StatusOK {
+		t.Fatalf("in-scope call = %d, want 200", status)
+	}
+
+	status, body := doJSON(t, enforced, http.MethodPost, "/v1/session/sessions",
+		map[string]any{"match_id": "m_scope", "players": []string{"p_1", "p_2"}}, "nakama-secret")
+	if status != http.StatusForbidden {
+		t.Fatalf("out-of-scope call = %d, want 403 (%v)", status, body)
+	}
+	if code, _ := body["error"].(map[string]any)["code"].(string); code != "permission_denied" {
+		t.Fatalf("error code = %q, want permission_denied", code)
+	}
+
+	// Observe mode is the rollout path: the same call succeeds and is logged as
+	// "would deny", which is how a policy gets validated without breaking anything.
+	observed := newServer(t, true)
+	status, _ = doJSON(t, observed, http.MethodPost, "/v1/session/sessions",
+		map[string]any{"match_id": "m_observe", "players": []string{"p_1", "p_2"}}, "nakama-secret")
+	if status != http.StatusOK {
+		t.Fatalf("observe mode = %d, want 200 (nothing should be refused yet)", status)
 	}
 }

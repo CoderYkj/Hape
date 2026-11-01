@@ -97,7 +97,9 @@ BACKEND_BASE_URL=http://backend:8080 \
 | `BACKEND_ADDR` | `:8080`（`cmd/platform` 传入） | 监听地址；容器里用 `0.0.0.0:8080` |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
 | `BACKEND_DEV_AUTH` | `true` | `true` 时挂 `DevAuth`；`false` 时必须注入真实认证器，否则拒绝启动 |
-| `BACKEND_SERVICE_TOKEN` | 空 | 服务间 token；关闭 dev auth 时必填（服务调用仍用它，不用 JWT） |
+| `BACKEND_SERVICE_CREDENTIALS` | 空 | 服务间凭证集：`name=token[:service+service]`。**推荐**；关闭 dev auth 时至少一条（否则启动失败）。scope 见 11.5.1 |
+| `BACKEND_SERVICE_SCOPE_ENFORCE` | `true` | `false` = 观察模式：越权调用照常成功，只记 `would-deny` 日志 |
+| `BACKEND_SERVICE_TOKEN` | 空 | 旧版单 token。仍可用（等价于一条 scope 为 `*` 的凭证），但与上面互斥；新部署用凭证集 |
 | `BACKEND_JWT_KEY` | 空 | Nakama 的 session 加密密钥（HS256）；`BACKEND_DEV_AUTH=false` 时必填 |
 | `BACKEND_JWT_ISSUER` | 空 | 非空时校验 token 的 `iss`（Nakama 默认发 `nakama`） |
 | `BACKEND_PLAYER_JWT_KEY` | 空 | 可选：给后端签发的玩家 token 单独一把密钥；空 = 复用 `BACKEND_JWT_KEY` |
@@ -115,8 +117,10 @@ BACKEND_BASE_URL=http://backend:8080 \
 两条硬规则（`Config.Validate` 与 `platform.New` 各拦一条）：
 
 1. `BACKEND_ENV=prod` 且 `BACKEND_DEV_AUTH=true` → 裸启动就失败。
-2. `BACKEND_DEV_AUTH=false` → 启动时校验 `BACKEND_JWT_KEY` 与 `BACKEND_SERVICE_TOKEN`，
-   缺一个就失败；**不会**悄悄退回 dev bearer token。JWT 模式已实现（`pkg/httpx/jwtauth.go`）：
+2. `BACKEND_DEV_AUTH=false` → 启动时校验 `BACKEND_JWT_KEY` 与
+   `BACKEND_SERVICE_CREDENTIALS`（或旧的 `BACKEND_SERVICE_TOKEN`），缺一个就失败；
+   凭证里 scope 指向不存在的 service 也失败（拼错的 scope 永远不会匹配，等于静默失效）。
+   **不会**悄悄退回 dev bearer token。JWT 模式已实现（`pkg/httpx/jwtauth.go`）：
    校验 Nakama 的 HS256 签名、`exp`/`iat`、可选 `iss`/`aud`，再把 Nakama 用户 id
    解析成后端 player id（`account.LookupByExternalID`，只读，不会建号）。
 
@@ -138,9 +142,12 @@ M0 没有可部署目标，所以这一步是模板，不是已验证的流水�
 1. **定镜像版本**：用 git short sha 或语义版本，不用 `latest`（`latest` 无法回滚）。
 2. **构建 + 打标**：`docker build -t <registry>/gamebackend:<tag> .`
 3. **推送到 registry**（待办：还没有 registry）。
-4. **部署**：`BACKEND_ENV=prod`、`BACKEND_DEV_AUTH=false`、`BACKEND_SERVICE_TOKEN=<secret>`、
+4. **部署**：`BACKEND_ENV=prod`、`BACKEND_DEV_AUTH=false`、
+   `BACKEND_SERVICE_CREDENTIALS=nakama=<secret>:account,ops=<secret2>:*`、
    `BACKEND_JWT_KEY=<Nakama 的 session 加密密钥>`；缺 `BACKEND_JWT_KEY` 会**启动失败**，
-   这是正确的失败（宁可起不来，也不要拿 dev token 上生产）。
+   这是正确的失败（宁可起不来，也不要拿 dev token 上生产）。调用方（Nakama 插件、
+   定时任务）仍用 `BACKEND_SERVICE_TOKEN` 这个变量名承载自己的那份 secret，值是凭证集里
+   对应条目的 token——名字对不上、scope 没覆盖到，都会在第一次调用时 403。
 5. **验证**：`/healthz` 200、`/readyz` 200、`/metrics` 里能看到请求计数、日志一行一请求。
 6. **观察 5 分钟**：5xx 比例、`backend_requests_total` 是否有异常操作码。
 
@@ -272,7 +279,33 @@ BACKEND_SERVICE_CREDENTIALS="nakama=<old>,nakama-v2=<new>"
 - **没有宽限期**：删掉即失效。第 3 步没做完就做第 4 步，漏掉的调用方立刻 401（这是好事：
   它比"悄悄用着旧凭证"更早暴露）。
 - **名字要可读且稳定**：`caller` 字段是唯一能回答"还有谁在用旧凭证"的证据。
-- 这一版只解决"能换"，**没有**解决"一条凭证能调所有服务接口"（最小权限），见 spec 0014 §9。
+#### 11.5.1 最小权限（scope）与观察期落地
+
+凭证可以声明它**能调哪些服务**（spec 0016）：
+
+```bash
+# nakama 只换身份，所以只给 account；运维工具显式给 *；将来的 worker 给 matchmaking+session
+BACKEND_SERVICE_CREDENTIALS="nakama=<tok>:account,ops=<tok2>:*,worker=<tok3>:matchmaking+session"
+```
+
+- **默认拒绝**：不写 scope = 什么都不能调，不是"什么都能调"。启动日志会写
+  `service_credentials=[nakama(account) ops(*)]`，`(none)` 就是漏配。
+- **越权是 403 `permission_denied`**（不是 401）：凭证是真的，只是不允许做这件事。
+- **拼错的 service 会启动失败**：scope 指向本进程没有的域永远不会匹配，等于静默失效。
+
+落地顺序（**不要跳过观察期**）：
+
+```bash
+# 1) 观察模式：越权调用照常成功，只记一行 would-deny
+BACKEND_SERVICE_SCOPE_ENFORCE=false
+# 2) 部署后跑 24h，按日志核对（字段够直接改配置）：
+#    msg="service credential out of scope (not enforced)"  caller=... op=... op_service=... scopes=...
+# 3) 归零后切回强制，再部署
+BACKEND_SERVICE_SCOPE_ENFORCE=true
+```
+
+为什么必须分两步：CI 覆盖的是"仓库里的示例凭证能触达所有 op"（一条测试专门盯这个），
+但**你实际部署的凭证集合**只有真实流量能验证。
 
 ### 11.6 回滚
 
@@ -291,6 +324,7 @@ BACKEND_SERVICE_CREDENTIALS="nakama=<old>,nakama-v2=<new>"
 | 生产 compose 缺密钥会失败 | `ops` job：无环境变量时 `config -q` 必须失败 |
 | 回收回读 | `pkg/battlealloc` 假厂商：停止后先 `running=true` 再 `false` → 成功；一直 running → 可重试并带状态；404/瞬时 500 → 成功；401 → 永久失败 |
 | 回收重试 | `services/session`：回收失败时战报仍 `applied=true` 且会话进 `release_pending`；allocator 恢复后 `RetryReleases` 清标记；持续失败时 attempts 递增 |
+| 凭证最小权限 | `pkg/httpx` 解析/语义单测；`platform` 端到端：限 `account` 的凭证调 `session.create` 得 403、观察模式下得 200；覆盖性测试断言示例 env 能触达每个 service-auth op |
 | 凭证轮换 | `pkg/httpx` / `platform` 单测：重叠期两条都通过且各自身份正确、移除旧的后旧 401、重复 token 拒绝启动、（dev 与 prod 两条 auth 路径都覆盖） |
 | 生产 compose 结构合法 | `ops` job：`--env-file backend.env.example config -q` |
 | systemd 单元语法 | `ops` job：`systemd-analyze verify` |

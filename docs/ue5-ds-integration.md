@@ -160,7 +160,8 @@ go run ./tools/fakeds -launch-ds exec -crash-restart           # 崩溃重启，
 
 | 现象 | 先看什么 |
 |---|---|
-| DS 上报 401 | `BACKEND_SERVICE_TOKEN` 与后端 `BACKEND_SERVICE_TOKEN` 是否一致 |
+| DS 上报 401 | 请求里的服务 token 是否在后端凭证集里（`BACKEND_SERVICE_CREDENTIALS` 的某个 token） |
+| DS 上报 403 | `permission_denied`：token 是真的，但那条凭证的 scope 没覆盖 `session`。给该凭证加 `:session`（spec 0016） |
 | DS 上报 404 | `BACKEND_BASE_URL` 路径前缀是否多/少了 `/v1` |
 | DS 上报 401 | 是不是漏了 `X-Session-Token`，或拿成了别场的 token；会话没有 token 说明是旧数据 |
 | DS 上报 412 | `GET session` 看状态是不是还在 `allocating`（ready 没成功） |

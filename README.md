@@ -191,7 +191,7 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 |---|---|---|
 | ~~`account.login` 信任 body 的 `external_id`~~ | — | **已修复**（ADR 0010）：登录改为服务专属，客户端不再能调用；生产 token 由后端签发（`iss=gamebackend`） |
 | ~~服务间认证是共享静态 token，换不了~~ | — | **已修复轮换**（spec 0014）：`BACKEND_SERVICE_CREDENTIALS` 支持多条带名字的凭证并行，四步零停机轮换；认证结果带调用方名字并进请求日志（`caller=`），"还有谁在用旧凭证"因此可回答 |
-| 一条凭证仍能调用所有 service 接口 | 轮换解决了"换不掉"，没解决"最小权限"：泄露一条凭证仍可调所有 service op（但伪造不了别的场次的战报——上报要每场 `X-Session-Token`，spec 0008） | 给凭证加可调 service 列表（spec 0014 §9）；更彻底是 mTLS / 短期令牌（M4） |
+| ~~一条凭证仍能调用所有 service 接口~~ | — | **已修复**（spec 0016）：凭证可声明可调 service（`name=token:account`），越权返回 403；默认拒绝、拼错 scope 启动失败、观察模式（`BACKEND_SERVICE_SCOPE_ENFORCE=false`）先验证再强制；一条覆盖性测试防止示例 env 漏配。余下是 mTLS/短期令牌（M4） |
 | 没有生产数据库运维 | 无备份、复制、连接池调优、密码策略 | 运维上车时补，见 `docs/postgres-local.md` 的"未验证/未做" |
 | `nakama/modules` 从未编译通过 | 登录链路在生产里跑不起来 | CI 里加了编译步骤（见第 3 项），失败就修 |
 

@@ -59,12 +59,12 @@ func TestLookupMatchesEveryEntry(t *testing.T) {
 		{Name: "new", Token: "new-secret"},
 	}
 	for token, want := range map[string]string{"old-secret": "old", "new-secret": "new"} {
-		name, ok := creds.Lookup(token)
+		cred, ok := creds.Lookup(token)
 		if !ok {
 			t.Fatalf("%q was not accepted", token)
 		}
-		if name != want {
-			t.Fatalf("%q resolved to %q, want %q", token, name, want)
+		if cred.Name != want {
+			t.Fatalf("%q resolved to %q, want %q", token, cred.Name, want)
 		}
 	}
 	for _, bad := range []string{"", "old-secret ", "unknown"} {
@@ -105,5 +105,59 @@ func TestNamesAreSorted(t *testing.T) {
 	names := creds.Names()
 	if strings.Join(names, ",") != "nakama,worker" {
 		t.Fatalf("names = %v, want sorted [nakama worker]", names)
+	}
+}
+
+// TestScopesParseAndDefaultToDeny pins the least-privilege grammar: `name=token:a+b`,
+// `*` for everything, and *no* scope meaning none (a credential that authenticates but
+// can call nothing is a configuration mistake, not a wildcard).
+func TestScopesParseAndDefaultToDeny(t *testing.T) {
+	creds, err := httpx.ParseServiceCredentials("nakama=abc:account,worker=xyz:matchmaking+session,ops=op:*,bare=def")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	byName := map[string]httpx.ServiceCredential{}
+	for _, cred := range creds {
+		byName[cred.Name] = cred
+	}
+	if !byName["nakama"].Allows("account") || byName["nakama"].Allows("economy") {
+		t.Fatalf("nakama scopes = %v", byName["nakama"].Services)
+	}
+	if !byName["worker"].Allows("session") || !byName["worker"].Allows("matchmaking") {
+		t.Fatalf("worker scopes = %v", byName["worker"].Services)
+	}
+	if !byName["ops"].Allows("economy") || !byName["ops"].Allows("anything") {
+		t.Fatalf("wildcard should allow everything: %v", byName["ops"].Services)
+	}
+	if len(byName["bare"].Services) != 0 || byName["bare"].Allows("account") {
+		t.Fatalf("an omitted scope must deny, got %v", byName["bare"].Services)
+	}
+}
+
+func TestScopesRejectAmbiguousInput(t *testing.T) {
+	cases := map[string]string{
+		"wildcard plus a name": "a=t:*+account",
+		"empty scope entry":    "a=t:account+",
+		"invalid service name": "a=t:Account",
+		"duplicate service":    "a=t:account+account",
+		"colon in the token":   "a=t:account=x",
+	}
+	for name, raw := range cases {
+		if _, err := httpx.ParseServiceCredentials(raw); err == nil {
+			t.Fatalf("%s should have been rejected: %q", name, raw)
+		}
+	}
+}
+
+// TestUnknownServicesAreReported is the startup guard against a typo in a scope: a name
+// that is not a service this process serves can never match, so it would deny silently.
+func TestUnknownServicesAreReported(t *testing.T) {
+	creds := httpx.ServiceCredentials{
+		{Name: "a", Token: "1", Services: []string{"account", "econmy"}},
+		{Name: "b", Token: "2", Services: []string{"*"}},
+	}
+	unknown := creds.UnknownServices(map[string]bool{"account": true, "session": true})
+	if len(unknown) != 1 || unknown[0] != "a:econmy" {
+		t.Fatalf("unknown = %v, want [a:econmy]", unknown)
 	}
 }

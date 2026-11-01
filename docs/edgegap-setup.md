@@ -108,7 +108,7 @@ Edgegap 分配的是**容器实例**，所以 UE5 Dedicated Server 必须先能�
 |---|---|---|
 | 本场 match/session | `MATCH_ID` / `SESSION_ID` | `battlealloc.Request.MatchID` / `SessionID` |
 | 上报战报的后端地址 | `BACKEND_BASE_URL` | 部署注入 |
-| 服务凭证 | `BACKEND_SERVICE_TOKEN` | **近期**是共享 token；M2 之后改 per-allocation token |
+| 服务凭证 | `BACKEND_SERVICE_TOKEN` | 后端凭证集里一条 scope 含 `session` 的凭证（`name=<ds>=<tok>:session`）；每场另有 `RUNTIME_TOKEN`。per-allocation 短期凭证属 M4 |
 
 对应 Edgegap 的 `env_vars: [{key, value, is_hidden}]`——敏感值设 `is_hidden: true`。
 

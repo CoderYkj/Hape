@@ -1,9 +1,11 @@
 package platform_test
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -152,4 +154,64 @@ func TestPlatformAcceptsAnInjectedAuthenticator(t *testing.T) {
 		t.Fatalf("platform.New with an injected authenticator: %v", err)
 	}
 	t.Cleanup(func() { _ = app.Close() })
+}
+
+// TestEveryServiceOpIsReachableWithTheShippedScopes is the guard against shipping a scope
+// policy that locks a caller out: the example env file in the repository has to be able to
+// reach every service-authenticated operation. Adding an op in a new domain without
+// updating the example therefore fails here, in CI, instead of in production at 3am.
+func TestEveryServiceOpIsReachableWithTheShippedScopes(t *testing.T) {
+	app := newApp(t)
+
+	raw, err := os.ReadFile("../deploy/systemd/backend.env.example")
+	if err != nil {
+		t.Fatalf("read the shipped env example: %v", err)
+	}
+	creds, err := shippedCredentials(string(raw))
+	if err != nil {
+		t.Fatalf("the shipped credentials do not parse: %v", err)
+	}
+	if len(creds) == 0 {
+		t.Fatal("the shipped env example declares no service credentials")
+	}
+
+	// A scope naming a service this process does not serve can never match, so it would
+	// deny silently: catch the typo at review time.
+	known := map[string]bool{}
+	for _, service := range api.Services(app.Ops()) {
+		known[service] = true
+	}
+	if unknown := creds.UnknownServices(known); len(unknown) > 0 {
+		t.Fatalf("the shipped scopes name unknown services: %v (known: %v)", unknown, api.Services(app.Ops()))
+	}
+
+	for _, op := range app.Ops() {
+		if op.Auth != api.AuthService {
+			continue
+		}
+		covered := false
+		for _, cred := range creds {
+			if cred.Allows(op.Service) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			t.Errorf("no shipped credential may call %s (service %q); update deploy/systemd/backend.env.example",
+				op.ID, op.Service)
+		}
+	}
+}
+
+func shippedCredentials(envFile string) (httpx.ServiceCredentials, error) {
+	for _, line := range strings.Split(envFile, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "BACKEND_SERVICE_CREDENTIALS=") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(line, "BACKEND_SERVICE_CREDENTIALS="))
+		value = strings.Trim(value, "\"")
+		return httpx.ParseServiceCredentials(value)
+	}
+	return nil, errors.New("the shipped env example has no BACKEND_SERVICE_CREDENTIALS")
 }

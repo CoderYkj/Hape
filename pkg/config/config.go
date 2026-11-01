@@ -26,9 +26,13 @@ type Config struct {
 	// what makes a rotation possible without downtime. Parsed by the binary, because
 	// the credential rules live next to the authenticator that enforces them.
 	ServiceCredentialsRaw string
-	JWTKey                string // Nakama session encryption key; required when DevAuth is off
-	PlayerJWTKey          string // optional: separate key for backend-issued player tokens
-	JWTIssuer             string // optional `iss` check
+	// ServiceScopeEnforce is BACKEND_SERVICE_SCOPE_ENFORCE (default true). False turns
+	// the least-privilege check into a log-only observation, which is the rollout path
+	// for a scope policy: validate it against real traffic before refusing.
+	ServiceScopeEnforce bool
+	JWTKey              string // Nakama session encryption key; required when DevAuth is off
+	PlayerJWTKey        string // optional: separate key for backend-issued player tokens
+	JWTIssuer           string // optional `iss` check
 	// PlayerTokenTTL is how long a backend-issued player token lives.
 	PlayerTokenTTL time.Duration
 	Allocator      string // local | gamelift | edgegap | agones
@@ -73,6 +77,7 @@ func Load(service, defaultAddr string) (Config, error) {
 		DevAuth:               envOr("BACKEND_DEV_AUTH", "true") == "true",
 		ServiceToken:          os.Getenv("BACKEND_SERVICE_TOKEN"),
 		ServiceCredentialsRaw: os.Getenv("BACKEND_SERVICE_CREDENTIALS"),
+		ServiceScopeEnforce:   envOr("BACKEND_SERVICE_SCOPE_ENFORCE", "true") == "true",
 		JWTKey:                os.Getenv("BACKEND_JWT_KEY"),
 		PlayerJWTKey:          os.Getenv("BACKEND_PLAYER_JWT_KEY"),
 		JWTIssuer:             os.Getenv("BACKEND_JWT_ISSUER"),

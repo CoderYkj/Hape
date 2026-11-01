@@ -1,6 +1,7 @@
 package httpx
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"log/slog"
@@ -28,6 +29,10 @@ type Router struct {
 	metrics *Metrics
 	mux     *http.ServeMux
 	ops     []api.Op
+	// enforceScopes turns the least-privilege check into a refusal. It defaults to true;
+	// observe mode (log-only) exists so a scope policy can be validated against real
+	// traffic before it starts refusing anything.
+	enforceScopes bool
 }
 
 // NewRouter builds a router. auth may be nil only when no authenticated op is
@@ -37,13 +42,22 @@ func NewRouter(service string, log *slog.Logger, auth Authenticator) *Router {
 		log = slog.Default()
 	}
 	return &Router{
-		service: service,
-		auth:    auth,
-		log:     log,
-		metrics: NewMetrics(service),
-		mux:     http.NewServeMux(),
+		service:       service,
+		auth:          auth,
+		log:           log,
+		metrics:       NewMetrics(service),
+		mux:           http.NewServeMux(),
+		enforceScopes: true,
 	}
 }
+
+// SetScopeEnforcement switches the least-privilege check between refusing (default) and
+// only logging what it would refuse.
+//
+// Observe mode is the rollout path: run it against real traffic, watch for
+// "service credential out of scope (not enforced)" lines, fix the scopes, then enforce.
+// Enforcing a policy nobody validated is how a deployment loses an op it needed.
+func (r *Router) SetScopeEnforcement(enforce bool) { r.enforceScopes = enforce }
 
 // Metrics returns the registry this router publishes. Domain services use it to add
 // counters and gauges to the same /metrics endpoint.
@@ -142,6 +156,16 @@ func (r *Router) instrument(op api.Op, h HandlerFunc) http.Handler {
 				return
 			}
 			ctx = WithPrincipal(ctx, principal)
+
+			// Least privilege for service callers. Players are already scoped by the op
+			// itself (AuthPlayer), so there is nothing to compare for them.
+			if op.Auth == api.AuthService && !r.scopeAllows(ctx, op, principal) {
+				apierr.Write(sw, apierr.PermissionDenied(
+					"service credential is not allowed to call this service").
+					WithDetail("caller", principal.Service).
+					WithDetail("service", op.Service))
+				return
+			}
 		}
 
 		out, err := h(rq.WithContext(ctx))
@@ -163,4 +187,26 @@ func newRequestID() string {
 		return "0000000000000000"
 	}
 	return hex.EncodeToString(b[:])
+}
+
+// scopeAllows is the least-privilege decision for one call: does this credential's scope
+// cover the service that owns the operation?
+//
+// Empty scopes deny: a credential that can authenticate but call nothing is a
+// configuration mistake, and failing closed is the only safe default for a permission
+// check.
+func (r *Router) scopeAllows(ctx context.Context, op api.Op, p Principal) bool {
+	for _, allowed := range p.Scopes {
+		if allowed == AllServices || allowed == op.Service {
+			return true
+		}
+	}
+	if !r.enforceScopes {
+		// Observe mode: say exactly what enforcement would have refused, with the
+		// identity and the service, because that line is the input to fixing scopes.
+		r.log.WarnContext(ctx, "service credential out of scope (not enforced)",
+			"caller", p.Service, "op", op.ID, "op_service", op.Service, "scopes", p.Scopes)
+		return true
+	}
+	return false
 }

@@ -92,7 +92,9 @@ dev 模式下 token 必须是 `dev-player-<player_id>` 或 `dev-service`；
 
 1. 起 Postgres + Nakama（见 `deploy/docker-compose.yml`，未验证）。
 2. 把 `nakama/modules/` 编译成 `.so` 放进 Nakama 的 `data/modules/`（需要联网拉依赖）。
-3. `BACKEND_DEV_AUTH=false` + 真实 `BACKEND_SERVICE_TOKEN`。
+3. `BACKEND_DEV_AUTH=false` + 真实凭证集：`BACKEND_SERVICE_CREDENTIALS=nakama=<secret>:account`
+   （Nakama 插件用同名变量 `BACKEND_SERVICE_TOKEN` 承载这条 secret；scope 必须覆盖它要调的
+   service，否则 403）。
 4. Nakama 的登录钩子把外部身份转发到 `POST /v1/account/sessions`。
 
 ## 7. 接入真实托管战斗服（M2）

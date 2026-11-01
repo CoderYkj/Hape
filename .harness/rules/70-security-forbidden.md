@@ -11,6 +11,9 @@
 
 - 不读取、不输出、不提交任何密钥、token、数据库口令、真实玩家数据。
 - 服务 token 只存在于服务端进程环境变量与 CI secret；**绝不**下发给客户端。
+- 服务凭证必须声明 **scope**（`name=token:service+service`，`*` 仅限运维工具）：
+  最小权限不是可选项。新增 service-auth op 时必须确认 `deploy/systemd/backend.env.example`
+  仍能触达它——否则 CI 的覆盖性测试会失败（spec 0016）。
 - 日志里不出现：完整 `Authorization` 头、请求体、邮箱、设备 id 原值。
 - 示例代码与文档用 `dev-service`、`player-1` 这类假值。
 

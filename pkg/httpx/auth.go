@@ -15,6 +15,9 @@ type Principal struct {
 	PlayerID   string
 	ExternalID string
 	Service    string
+	// Scopes are the services this credential may call. Empty for players, and for
+	// service credentials that declared no scope (which the router denies).
+	Scopes []string
 }
 
 // IsPlayer reports whether the caller is an end player.
@@ -61,7 +64,9 @@ func NewDevAuth(serviceToken string) *DevAuth {
 	}
 	return &DevAuth{
 		ServiceToken: serviceToken,
-		Credentials:  ServiceCredentials{{Name: LegacyServiceCredentialName, Token: serviceToken}},
+		// The single-token dev path is unscoped by construction: it exists so `go run`
+		// and the local tools need no configuration, and prod never uses it.
+		Credentials: ServiceCredentials{{Name: LegacyServiceCredentialName, Token: serviceToken, Services: []string{AllServices}}},
 	}
 }
 
@@ -94,11 +99,11 @@ func (d *DevAuth) Service(r *http.Request) (Principal, error) {
 	if len(creds) == 0 && d.ServiceToken != "" {
 		creds = ServiceCredentials{{Name: LegacyServiceCredentialName, Token: d.ServiceToken}}
 	}
-	name, ok := creds.Lookup(bearer(r))
+	cred, ok := creds.Lookup(bearer(r))
 	if !ok {
 		return Principal{}, apierr.Unauthenticated("missing or invalid service token")
 	}
-	return Principal{Service: name}, nil
+	return Principal{Service: cred.Name, Scopes: cred.Services}, nil
 }
 
 func bearer(r *http.Request) string {

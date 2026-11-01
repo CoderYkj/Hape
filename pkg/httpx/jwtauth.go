@@ -82,7 +82,13 @@ func NewJWTAuth(cfg JWTAuthConfig) (*JWTAuth, error) {
 	}
 	creds := cfg.ServiceCredentials
 	if len(creds) == 0 && cfg.ServiceToken != "" {
-		creds = ServiceCredentials{{Name: LegacyServiceCredentialName, Token: cfg.ServiceToken}}
+		// The single-token variable cannot express a scope, so this credential is
+		// unscoped. Callers that need least privilege use ServiceCredentials.
+		creds = ServiceCredentials{{
+			Name:     LegacyServiceCredentialName,
+			Token:    cfg.ServiceToken,
+			Services: []string{AllServices},
+		}}
 	}
 	if len(creds) == 0 {
 		return nil, errors.New("httpx: service token is required next to JWT auth")
@@ -152,11 +158,11 @@ func (a *JWTAuth) Service(r *http.Request) (Principal, error) {
 	if presented == "" {
 		return Principal{}, apierr.Unauthenticated("missing service token")
 	}
-	name, ok := a.services.Lookup(presented)
+	cred, ok := a.services.Lookup(presented)
 	if !ok {
 		return Principal{}, apierr.Unauthenticated("invalid service token")
 	}
-	return Principal{Service: name}, nil
+	return Principal{Service: cred.Name, Scopes: cred.Services}, nil
 }
 
 // verify checks the algorithm, the signature (with the key that matches the issuer),
