@@ -59,6 +59,53 @@
         "x-note": "Not idempotent: each call allocates a dedicated server. Call it once per match_id; after a timeout, read the session back instead of creating a second one."
       }
     },
+    "/v1/session/sessions/by-match/{match_id}": {
+      "get": {
+        "operationId": "session.get_by_match",
+        "summary": "Find your session by match id",
+        "tags": [
+          "session"
+        ],
+        "security": [
+          {
+            "playerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "match_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSessionResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error envelope. See components.schemas.Error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-note": "The client-side read path: a ticket yields match_id, this yields the address to connect to."
+      }
+    },
     "/v1/session/sessions/{session_id}": {
       "get": {
         "operationId": "session.get",

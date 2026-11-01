@@ -159,6 +159,21 @@ func (s *Service) Register(r *httpx.Router) {
 		Note:       "Idempotent by result_id; requires the service token AND the session's X-Session-Token. Downstream fan-out runs inside one transaction, so a retry re-runs idempotent sinks.",
 	}, s.submitResult)
 
+	// A client learns its match id from the matchmaking ticket and nothing else, so
+	// this is how it finds the server it has to connect to. Same scoping as
+	// session.get: only players in the match can read it, and the report credential
+	// never leaves the platform.
+	r.Handle(api.Op{
+		ID:       "session.get_by_match",
+		Service:  "session",
+		Method:   http.MethodGet,
+		Path:     "/v1/session/sessions/by-match/{match_id}",
+		Summary:  "Find your session by match id",
+		Response: api.T(GetSessionResponse{}),
+		Auth:     api.AuthPlayer,
+		Note:     "The client-side read path: a ticket yields match_id, this yields the address to connect to.",
+	}, s.getByMatch)
+
 	r.Handle(api.Op{
 		ID:       "session.get",
 		Service:  "session",
@@ -463,6 +478,24 @@ func (s *Service) get(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return playerView(playerID, found)
+}
+
+func (s *Service) getByMatch(r *http.Request) (any, error) {
+	playerID, err := httpx.RequirePlayer(r)
+	if err != nil {
+		return nil, err
+	}
+	found, err := s.store.GetByMatch(r.Context(), httpx.Param(r, "match_id"))
+	if err != nil {
+		return nil, err
+	}
+	return playerView(playerID, found)
+}
+
+// playerView is the only way a session reaches a player: the report credential is
+// stripped, and a player outside the roster cannot read the session at all.
+func playerView(playerID string, found Session) (any, error) {
 	// Never hand the report credential to a player.
 	found.RuntimeToken = ""
 	for _, id := range found.Players {

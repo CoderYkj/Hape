@@ -82,6 +82,10 @@ type options struct {
 	dsCommand    string
 	matchSeconds int
 	crashRestart bool
+	// mode is whose role this process plays: "play" (make a match of its own, the
+	// original behaviour) or "worker" (wait for a real queue to produce a match, so a
+	// real client can be one of the players).
+	mode string
 }
 
 func main() {
@@ -97,16 +101,31 @@ func main() {
 	flag.IntVar(&opts.matchSeconds, "match-seconds", 1, "match duration handed to the dedicated server")
 	flag.BoolVar(&opts.crashRestart, "crash-restart", false,
 		"kill the dedicated server before it reports, restart it, and check the match settles once")
+	flag.StringVar(&opts.mode, "mode", "play",
+		"play (make this process's own match) or worker (wait for a real queue, so a real client can join)")
 	flag.Parse()
 
 	var err error
-	switch opts.launchDS {
-	case "none":
-		err = runBuiltin(opts)
-	case "exec", "docker":
-		err = runVendor(opts)
+	switch opts.mode {
+	case "play":
+		switch opts.launchDS {
+		case "none":
+			err = runBuiltin(opts)
+		case "exec", "docker":
+			err = runVendor(opts)
+		default:
+			err = fmt.Errorf("unknown -launch-ds %q (want none, exec or docker)", opts.launchDS)
+		}
+	case "worker":
+		if opts.launchDS == "none" {
+			// The worker is the provider: without a server to launch it would allocate a
+			// session nobody serves.
+			err = fmt.Errorf("-mode worker needs -launch-ds exec|docker")
+		} else {
+			err = runWorker(opts)
+		}
 	default:
-		err = fmt.Errorf("unknown -launch-ds %q (want none, exec or docker)", opts.launchDS)
+		err = fmt.Errorf("unknown -mode %q (want play or worker)", opts.mode)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fakeds: %v\n", err)

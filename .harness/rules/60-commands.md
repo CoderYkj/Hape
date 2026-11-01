@@ -15,6 +15,7 @@ go run ./tools/fakeds
 go run ./tools/fakeds -launch-ds exec
 go run ./tools/fakeds -launch-ds docker -ds-image hape-ds:ci
 go run ./tools/fakeds -launch-ds exec -crash-restart
+IDENTITY=dev CLIENT_FULL=1 QUEUE=ue5-drill sh scripts/ds-match-drill.sh
 docker build -f Dockerfile.ds -t hape-ds:ci .
 go run ./tools/apigen
 go run ./tools/apigen -check
@@ -82,9 +83,18 @@ go run ./tools/apigen -check
 ```bash
 go run ./cmd/platform                              # 终端 1
 go run ./tools/fakeds -launch-ds exec              # 终端 2：分配 + 启动 ds/ 二进制
-go run ./tools/fakeds -launch-ds exec -crash-restart   # 崩溃重启，只结算一次
+go run ./tools/fakeds -launch-ds exec -crash-restart
+IDENTITY=dev CLIENT_FULL=1 QUEUE=ue5-drill sh scripts/ds-match-drill.sh   # 崩溃重启，只结算一次
 docker build -f Dockerfile.ds -t hape-ds:ci . && \
   go run ./tools/fakeds -launch-ds docker -ds-image hape-ds:ci
+```
+
+三方对局（客户端 / 厂商 / 战斗服 三个独立进程，需要战斗服镜像已构建）：
+
+```bash
+docker build -f Dockerfile.ds -t hape-ds:ci .
+IDENTITY=dev CLIENT_FULL=1 QUEUE=ue5-drill sh scripts/ds-match-drill.sh      # 不依赖 Nakama
+IDENTITY=nakama CLIENT_FULL=1 QUEUE=ue5-drill sh scripts/ds-match-drill.sh   # 真 Nakama 链路
 ```
 
 判读要点：

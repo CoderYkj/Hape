@@ -4,13 +4,14 @@
 > （`clients/minimal`，CI 里对着真实 Nakama + 后端跑）。
 > UE5 代码片段**没有在引擎里编译过**——它是转写指引，不是已验证实现。
 
-## 1. 客户端只做四件事
+## 1. 客户端只做五件事
 
 ```text
   ① 登录 Nakama         → 拿到 Nakama session token（身份）
   ② 调 RPC login        → 拿到后端 player_id + 后端 token（兑换）
-  ③ 用后端 token 调后端  → 读档案、排队、轮询（一切游戏行为）
-  ④ 断线重连            → 同一套 token 重放 ③，不重新 ①
+  ③ 用后端 token 调后端  → 读档案、排队、按 match 反查自己的服务器
+  ④ 连服务器            → 用后端给的 address:port 打开 socket（唯一不是 HTTP 的一步）
+  ⑤ 断线重连            → 同一套 token 重放 ③，不重新 ①
 ```
 
 三条边界，越界就是设计错误：
@@ -28,13 +29,20 @@
 | ① | `POST {nakama}/v2/account/authenticate/device?create=true`，`Authorization: Basic base64(<serverKey>:)` | `token`（Nakama session）+ `user.id` |
 | ② | `POST {nakama}/v2/rpc/login?unwrap=true`，`Authorization: Bearer <Nakama token>` | 后端 `/v1/account/sessions` 的原文：`player.id` + `session_token`（生产环境是后端签发的 JWT，`iss=gamebackend`） |
 
+
 > **`/v1/account/sessions` 不是客户端接口**：它是服务专属（ADR 0010），由 Nakama 插件
 > 用服务凭证调用。客户端拿到 token 的唯一途径是 ② 这个 RPC。
 | ③ | `GET {backend}/v1/account/players/{player_id}`，`Authorization: Bearer <backend token>` | 自己的档案 |
 | ④ | `POST {backend}/v1/matchmaking/tickets` `{"queue":"ranked_1v1"}` | `ticket.id`（`status=waiting`） |
 | ⑤ | `GET {backend}/v1/matchmaking/tickets/{id}` | 票据状态；匹配后被 `matched`，出现 `match_id` |
+| ⑥ | `GET {backend}/v1/session/sessions/by-match/{match_id}` | `session.state` 与 `session.address`/`port`：这一局该连哪里 |
+| ⑦ | 连 `address:port`（v0 直连 UDP，无 relay） | 对局内的一切都发生在这条连接上 |
+| ⑧ | 回到 ⑥ 轮询直到 `state=finished` | 权威结果已结算，可以读自己的收益 |
 
 `docs` 里的后端契约以 `api/openapi/*.json` 为准（那是生成的，不会漂移）。
+
+> ⑥ 是 spec 0013 补上的读接口。客户端只从票据拿到 `match_id`，没有它就没有任何办法
+> 知道该连哪台机器——这不是 UX 问题，是"进不了对局"。
 
 ## 3. Token 规则（最容易写错的地方）
 
@@ -51,9 +59,17 @@
 ```text
 Disconnected ──① 成功──► Authenticated ──② 成功──► Ready
      ▲                        │                     │
-     │                    ①/② 失败                  ④ 入队成功
-     └────────── 401/超时 ────┴─────────────────────► InQueue ──⑤ matched──► Ready(对局)
+     │                    ①/② 失败                  ③ 入队成功
+     └────────── 401/超时 ────┴─────────────────────► InQueue
+                                                        │ ⑤ matched
+                                                        ▼
+                                              Resolving ──⑥──► Connecting ──⑦──► InMatch
+                                                                                      │ ⑧ finished
+                                                                                      ▼
+                                                                                  Settled
 ```
+
+`Resolving` 是 ⑥ 的轮询窗口（可能持续几十秒：托管厂商分配通常在 20–90s 量级）。
 
 ## 5. 错误 → UI 的最小映射
 
@@ -105,8 +121,9 @@ void UBackendClient::Login(const FString& DeviceId)
 
 | 层 | 方式 |
 |---|---|
-| 协议本身 | `go run ./clients/minimal`（CI 的 `nakama` job 里跑，对着真实 Nakama + 后端） |
-| 断言 | 客户端自己打印 `CLIENT_OK=1`；CI 另外断言 `players` 表里存在该 `external_id` |
+| ①–④ 协议 | `go run ./clients/minimal`（默认形态；CI 的 `nakama` job 对着真实 Nakama + 后端跑） |
+| ⑤–⑧ 完整对局 | `IDENTITY=nakama\|dev CLIENT_FULL=1 QUEUE=ue5-drill sh scripts/ds-match-drill.sh`：客户端 + 厂商（`fakeds -mode worker`）+ 容器化战斗服，三个进程 |
+| 断言 | 客户端打印 `ECHOES=5`（发 5 收 5）、`SESSION_STATE=finished`、`TOTAL_XP>0`、`CLIENT_OK=1`；`nakama` job 另断言 `players` 表里存在该 `external_id` |
 | UE5 转写 | **未验证**：需要 UE5 工程编译 + 一次真机联调 |
 
 ## 8. 明确不做

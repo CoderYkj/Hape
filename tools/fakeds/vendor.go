@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // dsRun is one launch of the reference dedicated server.
@@ -33,7 +34,98 @@ func runVendor(opts options) error {
 	if err != nil {
 		return err
 	}
+	return serveMatch(opts, f, true)
+}
 
+// runWorker is the provider side of a match it did not invent: it waits for the queue
+// to produce one, allocates a server for the roster that is actually queued, and then
+// behaves exactly like runVendor.
+//
+// This is what lets a real client be one of the players. In play mode the tool logs in
+// its own two players, so a client can only ever watch; here the roster comes from the
+// tickets, so the client that enqueued is the one that gets the server address.
+func runWorker(opts options) error {
+	service := client{base: opts.base, token: "dev-service"}
+	f := fixture{service: service}
+
+	step("wait for a queued match")
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		body, err := service.do(http.MethodPost, "/v1/matchmaking/queues/"+opts.queue+"/pop",
+			map[string]any{"count": 2})
+		if err != nil {
+			return err
+		}
+		if matched, _ := body["matched"].(bool); matched {
+			f.matchID = pickPath(body, "match_id")
+			f.players = playersOf(body)
+			break
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("no match formed in 90s; is a client enqueued on queue %q?", opts.queue)
+		}
+		time.Sleep(time.Second)
+	}
+	fmt.Printf("  match: %s players: %v\n", f.matchID, f.players)
+	if len(f.players) < 2 {
+		return fmt.Errorf("pop returned %d players, need at least 2", len(f.players))
+	}
+
+	step("allocate a server")
+	body, err := service.do(http.MethodPost, "/v1/session/sessions", map[string]any{
+		"match_id": f.matchID,
+		"players":  f.players,
+		"queue":    opts.queue,
+		"map":      "arena_01",
+	})
+	if err != nil {
+		return err
+	}
+	f.sessionID = pickPath(body, "session.id")
+	f.runtimeToken = pickPath(body, "runtime_token")
+	if f.runtimeToken == "" {
+		return fmt.Errorf("session.create did not return a runtime token")
+	}
+	session, _ := body["session"].(map[string]any)
+	f.address = pickPath(body, "session.address")
+	if port, ok := session["port"].(float64); ok {
+		f.port = int(port)
+	}
+	fmt.Printf("  session: %s state=%s provider=%s address=%s:%d\n", f.sessionID,
+		pickPath(body, "session.state"), pickPath(body, "session.provider"), f.address, f.port)
+	fmt.Printf("SESSION_ID=%s\n", f.sessionID)
+	fmt.Printf("MATCH_ID=%s\n", f.matchID)
+
+	// The worker holds no player credentials, so it cannot read anyone's wallet.
+	return serveMatch(opts, f, false)
+}
+
+// playersOf flattens the popped tickets into the roster the session needs, including
+// parties: a squad ticket carries its members in `party`.
+func playersOf(body map[string]any) []string {
+	var out []string
+	tickets, _ := body["tickets"].([]any)
+	for _, item := range tickets {
+		ticket, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if id, _ := ticket["player_id"].(string); id != "" {
+			out = append(out, id)
+		}
+		party, _ := ticket["party"].([]any)
+		for _, member := range party {
+			if id, _ := member.(string); id != "" {
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
+// serveMatch is everything after the roster is known: start the server, check what it
+// did, and read the settlement back when this process holds player credentials.
+func serveMatch(opts options, f fixture, havePlayerTokens bool) error {
 	resultsDir, err := os.MkdirTemp("", "hape-ds-results-")
 	if err != nil {
 		return err
@@ -99,17 +191,29 @@ func runVendor(opts options) error {
 	}
 
 	step("check the backend agrees")
-	body, err := f.playerAt(0).do(http.MethodGet, "/v1/session/sessions/"+f.sessionID, nil)
-	if err != nil {
-		return err
+	if havePlayerTokens {
+		body, err := f.playerAt(0).do(http.MethodGet, "/v1/session/sessions/"+f.sessionID, nil)
+		if err != nil {
+			return err
+		}
+		if state := pickPath(body, "session.state"); state != "finished" {
+			return fmt.Errorf("session state is %q, want finished", state)
+		}
+		fmt.Printf("  session %s: finished\n", f.sessionID)
+	} else {
+		// The worker holds no player credentials, and session.get is player-scoped on
+		// purpose, so it cannot read the session back - and does not need to: the
+		// backend only answers applied=true after it committed the finished state.
+		// The client reads its own settlement with its own token instead.
+		fmt.Println("  applied=true is the confirmation: the session was finished before the backend answered")
 	}
-	if state := pickPath(body, "session.state"); state != "finished" {
-		return fmt.Errorf("session state is %q, want finished", state)
-	}
-	fmt.Printf("  session %s: finished\n", f.sessionID)
 
-	if err := printSettlement(f, opts.queue); err != nil {
-		return err
+	if havePlayerTokens {
+		if err := printSettlement(f, opts.queue); err != nil {
+			return err
+		}
+	} else {
+		fmt.Println("  (no player credentials here: the client reads its own settlement)")
 	}
 
 	fmt.Printf("\nOK: %s settled session %s (result_id=%s, runtime token %d bytes)\n",

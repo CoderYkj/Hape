@@ -30,6 +30,15 @@ docker build -f Dockerfile.ds -t hape-ds:ci . && \
 
 `ds/` 是参考 Dedicated Server（Go，不是 UE5 构建），环境契约见 spec 0012。
 
+再往前一步：**客户端真的进一局**（三个独立进程：客户端 / 厂商 / 战斗服）：
+
+```bash
+IDENTITY=dev CLIENT_FULL=1 QUEUE=ue5-drill sh scripts/ds-match-drill.sh
+```
+
+客户端打印 `ECHOES=5`（发 5 个包收回 5 个）、`SESSION_STATE=finished`、`TOTAL_XP=125`。
+`IDENTITY=nakama` 走真实 Nakama 那条链路（spec 0013）。
+
 想让它真的落库（七个域都已接 Postgres）：
 
 ```powershell
@@ -120,8 +129,13 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 - `docs/ue5-ds-integration.md` 里的 C++ 片段：未在 UE5 工程里编译
 - Nakama 桥接（Lua 模块）：**CI 在真 Nakama 上验证过**——设备登录 → RPC `login` →
   后端 `account.login` → 后端读取，并在 `players` 表里断言到对应行（spec 0009）。
-  仍未验证的是**客户端侧**：UE5/浏览器如何获取 Nakama session、调用 RPC、再用返回的
-  后端 token 调后端。
+- **客户端对局闭环**（spec 0013）：`clients/minimal` 从"入队"一路走到"连上战斗服"——
+  按票据上的 `match_id` 用 `GET /v1/session/sessions/by-match/{match_id}` 找到地址，
+  打开 UDP、发 5 个包收回 5 个，再等 `finished` 用**自己的** token 读收益。
+  CI 两个 job 各跑一遍：`ds` job 用 `IDENTITY=dev`（不依赖 Nakama），
+  `nakama` job 用 `IDENTITY=nakama`（真设备登录 + RPC 兑换）。本机实跑数字：
+  `ECHOES=5`、`SESSION_STATE=finished`、`TOTAL_XP=125`。
+  仍未验证的是**UE5 转写**：`docs/ue5-client-model.md` §6 的 C++ 片段没在引擎里编译过。
 - 真实托管战斗服：Edgegap 适配器 **已真机跑通**（分配 3s 就绪、拿到
   `172.237.14.252:32719`、释放后状态 TERMINATED）
 - **自有 DS 镜像 + 每场凭证容器内验证**（spec 0012）：`ds/` 参考战斗服在容器里跑完

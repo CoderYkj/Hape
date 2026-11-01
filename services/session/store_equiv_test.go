@@ -132,6 +132,18 @@ func TestStoresAgree(t *testing.T) {
 				t.Fatalf("unknown session: code = %q, want not_found", apierr.As(err).Code)
 			}
 
+			// The client read path resolves the same object by match id.
+			byMatch, err := tc.store.GetByMatch(ctx, matchID)
+			if err != nil {
+				t.Fatalf("get by match: %v", err)
+			}
+			if byMatch.ID != created.ID || byMatch.State != session.StateFinished {
+				t.Fatalf("get by match returned %+v, want the finished %s", byMatch, created.ID)
+			}
+			if _, err := tc.store.GetByMatch(ctx, "m_no_such_match"); apierr.As(err).Code != apierr.CodeNotFound {
+				t.Fatalf("unknown match: code = %q, want not_found", apierr.As(err).Code)
+			}
+
 			// The authoritative report must be on file, and a replay must not
 			// duplicate it: that is the audit trail behind the payouts.
 			recorder, ok := tc.store.(session.ResultRecorder)

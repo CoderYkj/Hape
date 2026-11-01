@@ -60,6 +60,10 @@ var ErrInvalidTransition = apierr.Precondition("invalid session state transition
 type Store interface {
 	Create(ctx context.Context, session Session) (Session, error)
 	Get(ctx context.Context, id string) (Session, error)
+	// GetByMatch resolves the session allocated for a match. A client learns its
+	// match id from the matchmaking ticket and nothing else, so without this a
+	// client can be in a match it has no way to find the server for.
+	GetByMatch(ctx context.Context, matchID string) (Session, error)
 	// Update applies mutate under a lock and persists the result. Returning an
 	// error from mutate aborts the write, which keeps the state machine atomic.
 	Update(ctx context.Context, id string, mutate func(*Session) error) (Session, error)
@@ -128,6 +132,17 @@ func (m *Memory) Get(_ context.Context, id string) (Session, error) {
 		return Session{}, apierr.NotFound("session not found").WithDetail("session_id", id)
 	}
 	return session, nil
+}
+
+// GetByMatch implements Store.
+func (m *Memory) GetByMatch(_ context.Context, matchID string) (Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id, ok := m.byMatch[matchID]
+	if !ok {
+		return Session{}, apierr.NotFound("no session for this match").WithDetail("match_id", matchID)
+	}
+	return m.byID[id], nil
 }
 
 func (m *Memory) Update(_ context.Context, id string, mutate func(*Session) error) (Session, error) {

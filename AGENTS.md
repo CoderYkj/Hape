@@ -41,6 +41,7 @@ Windows PowerShell 5.1），所以 Windows 上优先用 `scripts\*.cmd` 包装�
 | 模拟一场完整对局 | `go run ./tools/fakeds` |
 | 验证凭证注入战斗服 | `go run ./tools/fakeds -launch-ds exec`（或 `-launch-ds docker -ds-image hape-ds:ci`） |
 | 崩溃重启只结算一次 | `go run ./tools/fakeds -launch-ds exec -crash-restart` |
+| 客户端真进一局（三进程） | `IDENTITY=dev CLIENT_FULL=1 QUEUE=ue5-drill sh scripts/ds-match-drill.sh` |
 | 单测 + e2e | `go test ./...` |
 | 竞态检查 | `go test -race ./...` |
 | 静态检查 | `go vet ./...` |

@@ -457,3 +457,35 @@ func TestExpireStaleRefusesANonsenseWindow(t *testing.T) {
 		t.Fatal("ExpireStale with a zero window should fail loudly")
 	}
 }
+
+// TestSessionGetByMatchIsTheClientReadPath pins the op that closes the client loop: a
+// ticket yields a match id, and this yields the address to connect to - with the same
+// scoping as session.get, because it is the same object.
+func TestSessionGetByMatchIsTheClientReadPath(t *testing.T) {
+	h := newHarness(t, &fakeAllocator{}, &fakeSink{})
+	id := h.createSession("p_1", "p_2")
+
+	status, body := h.do(http.MethodGet, "/v1/session/sessions/by-match/m_test", nil, "dev-player-p_1")
+	h.expect(status, http.StatusOK, "a player reading their own match")
+	if got, _ := nested(t, body, "session", "id").(string); got != id {
+		t.Fatalf("session id = %q, want %q", got, id)
+	}
+	// The DS credential must not be reachable from a player-facing read, whichever
+	// route they take.
+	sessionBody, ok := nested(t, body, "session").(map[string]any)
+	if !ok {
+		t.Fatal("session body is not an object")
+	}
+	if token, present := sessionBody["runtime_token"]; present && token != "" {
+		t.Fatalf("runtime_token = %v in the player read path", token)
+	}
+
+	status, _ = h.do(http.MethodGet, "/v1/session/sessions/by-match/m_test", nil, "dev-player-p_9")
+	h.expect(status, http.StatusForbidden, "reading a match you are not in")
+
+	status, _ = h.do(http.MethodGet, "/v1/session/sessions/by-match/m_test", nil, "")
+	h.expect(status, http.StatusUnauthorized, "anonymous match lookup")
+
+	status, _ = h.do(http.MethodGet, "/v1/session/sessions/by-match/m_unknown", nil, "dev-player-p_1")
+	h.expect(status, http.StatusNotFound, "a match that was never allocated")
+}

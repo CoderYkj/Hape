@@ -316,6 +316,15 @@ jobs:
           go run ./clients/minimal 2>&1 | tee /tmp/client.log
           grep -q '^CLIENT_OK=1$' /tmp/client.log
 
+      - name: build the dedicated server image
+        run: docker build -f Dockerfile.ds -t hape-ds:ci .
+
+      # The client loop closed: a Nakama identity, a real match out of the queue, a
+      # containerized dedicated server, packets both ways, and the payout read back with
+      # the client's own token. Every earlier step mocks one of these pieces.
+      - name: the client plays a full match against a dedicated server
+        run: IDENTITY=nakama QUEUE=ue5-drill sh scripts/ds-match-drill.sh
+
       - name: the account is really in the backend database
         run: |
           external_id="$(grep '^EXTERNAL_ID=' /tmp/nakama-smoke.log | cut -d= -f2)"
@@ -504,6 +513,9 @@ jobs:
 
       - name: a crashed instance restarts and still settles once
         run: go run ./tools/fakeds -launch-ds docker -ds-image hape-ds:ci -crash-restart
+
+      - name: the client plays a full match (dev identity, no Nakama needed)
+        run: IDENTITY=dev QUEUE=ue5-drill sh scripts/ds-match-drill.sh
 
       - name: backend log
         if: always()

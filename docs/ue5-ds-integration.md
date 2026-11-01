@@ -138,9 +138,9 @@ void UDsBackendClient::ReportResult(const FString& SessionId, const TArray<FPlay
 5. 连接：<address>:<port>（v0 直连，无 relay）
 ```
 
-客户端拿不到 session id 时的兜底：`get_ticket` 返回 `match_id` 后，后端应能按 match 反查
-session。这个读接口目前**没有实现**，也不属于任何里程碑——补的时候就是一次
-`GET /v1/session/sessions?match_id=`（契约先行，`session` 服务加一个 op）。
+第 4 步用的就是 `GET /v1/session/sessions/by-match/{match_id}`（spec 0013）：票据只给
+`match_id`，这个读接口把它换成 `address:port`。它之前是缺的——客户端因此进不了对局。
+只返回名单内玩家能读的那一场，且永远不含 `runtime_token`。
 
 ## 6. 没有 UE5 时怎么联调
 

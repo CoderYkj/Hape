@@ -84,7 +84,8 @@ func run() error {
 	fmt.Printf("ds: ready session=%s address=%s port=%d\n", cfg.SessionID, cfg.Advertise, port)
 
 	packets := play(ctx, conn, cfg.Duration)
-	fmt.Printf("ds: match over duration=%s packets=%d result_id=%s\n", cfg.Duration, packets, state.ResultID)
+	fmt.Printf("ds: match over duration=%s packets=%d echoed=%d result_id=%s\n",
+		cfg.Duration, packets, packets, state.ResultID)
 
 	if cfg.CrashBeforeReport {
 		fmt.Printf("ds: crash drill - exiting before reporting result_id=%s\n", state.ResultID)
@@ -117,8 +118,12 @@ func play(ctx context.Context, conn net.PacketConn, d time.Duration) int {
 			return count
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(min(remaining, 200*time.Millisecond)))
-		if _, _, err := conn.ReadFrom(buf); err == nil {
+		if n, from, err := conn.ReadFrom(buf); err == nil {
 			count++
+			// Echo it back. The reference server speaks no game protocol, and the
+			// client drill needs to prove the round trip rather than infer it from a
+			// log. A real server replaces this with actual replication.
+			_, _ = conn.WriteTo(buf[:n], from)
 		}
 	}
 }

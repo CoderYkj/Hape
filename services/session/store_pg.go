@@ -79,6 +79,13 @@ func (s *PG) Get(ctx context.Context, id string) (Session, error) {
 	return s.get(ctx, s.pool, id, false)
 }
 
+// GetByMatch implements Store.
+func (s *PG) GetByMatch(ctx context.Context, matchID string) (Session, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+	return s.getBy(ctx, s.pool, "match_id", matchID, false)
+}
+
 // Update implements Store.
 //
 // mutate runs against a locked snapshot. If it returns an error (an illegal state
@@ -159,10 +166,18 @@ func (s *PG) ExpireStale(ctx context.Context, before time.Time) ([]Session, erro
 }
 
 func (s *PG) get(ctx context.Context, db pg.DB, id string, forUpdate bool) (Session, error) {
+	return s.getBy(ctx, db, "id", id, forUpdate)
+}
+
+// getBy is get() on a different unique column.
+//
+// `column` is a code constant, never user input - it is interpolated into the query
+// because the column name cannot be a placeholder. Both callers pass a literal.
+func (s *PG) getBy(ctx context.Context, db pg.DB, column, value string, forUpdate bool) (Session, error) {
 	query := `SELECT id, match_id, state, queue, region, map,
 	                 coalesce(allocation_id, ''), coalesce(provider, ''), coalesce(address, ''),
 	                 coalesce(port, 0), coalesce(result_id, ''), coalesce(runtime_token, ''), created_at, ready_at, finished_at
-	            FROM sessions WHERE id = $1`
+	            FROM sessions WHERE ` + column + ` = $1`
 	if forUpdate {
 		query += ` FOR UPDATE`
 	}
@@ -171,12 +186,15 @@ func (s *PG) get(ctx context.Context, db pg.DB, id string, forUpdate bool) (Sess
 		session   Session
 		createdAt time.Time
 	)
-	err := db.QueryRow(ctx, query, id).Scan(
+	err := db.QueryRow(ctx, query, value).Scan(
 		&session.ID, &session.MatchID, &session.State, &session.Queue, &session.Region, &session.Map,
 		&session.AllocationID, &session.Provider, &session.Address, &session.Port, &session.ResultID,
 		&session.RuntimeToken, &createdAt, &session.ReadyAt, &session.FinishedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Session{}, apierr.NotFound("session not found").WithDetail("session_id", id)
+		if column == "match_id" {
+			return Session{}, apierr.NotFound("no session for this match").WithDetail("match_id", value)
+		}
+		return Session{}, apierr.NotFound("session not found").WithDetail("session_id", value)
 	}
 	if err != nil {
 		return Session{}, err
@@ -184,7 +202,7 @@ func (s *PG) get(ctx context.Context, db pg.DB, id string, forUpdate bool) (Sess
 	session.CreatedAt = createdAt.UTC()
 
 	rows, err := db.Query(ctx,
-		`SELECT player_id FROM session_players WHERE session_id = $1`, id)
+		`SELECT player_id FROM session_players WHERE session_id = $1`, session.ID)
 	if err != nil {
 		return Session{}, err
 	}

@@ -76,12 +76,32 @@ func TestContractWriteOpsDeclareRetrySemantics(t *testing.T) {
 // server-to-server operation must never be reachable with a player token.
 func TestServiceOpsRequireServiceAuth(t *testing.T) {
 	app := newApp(t)
+	// The player-facing reads are an explicit list: adding a player-auth'd session op
+	// is a decision about the authority boundary, not a side effect of adding a route.
+	playerReads := map[string]bool{
+		"session.get":          true,
+		"session.get_by_match": true,
+	}
+	seen := map[string]bool{}
 	for _, op := range app.Ops() {
-		switch op.Service {
-		case "session":
-			if op.ID != "session.get" && op.Auth != api.AuthService {
-				t.Errorf("%s must be service-authenticated", op.ID)
+		if op.Service != "session" {
+			continue
+		}
+		if playerReads[op.ID] {
+			seen[op.ID] = true
+			if op.Auth != api.AuthPlayer {
+				t.Errorf("%s is a player read path but requires %v", op.ID, op.Auth)
 			}
+			continue
+		}
+		if op.Auth != api.AuthService {
+			t.Errorf("%s must be service-authenticated", op.ID)
+		}
+	}
+	// And the list cannot rot: every entry must still exist.
+	for id := range playerReads {
+		if !seen[id] {
+			t.Errorf("%s is listed as a player read path but is not registered", id)
 		}
 	}
 }
