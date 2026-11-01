@@ -53,15 +53,19 @@ local function rpc_login(ctx, payload)
     -- argument error, and the order has differed between releases (3.22 wants headers
     -- as argument #3). Try the documented order, then the one 3.22 accepts; both are
     -- logged so the next reader knows which one the image uses.
+    -- http_request returns more than (code, body) in some releases - 3.22 hands back a
+    -- third value - so the body is picked by type rather than by position.
     local first_err
-    local ok, code, resp = pcall(nk.http_request, url, "POST", headers, body, 5000)
+    local ok, code, second, third = pcall(nk.http_request, url, "POST", headers, body, 5000)
     if ok then
-        nk.logger_info("login: http_request(headers, body) form accepted")
+        nk.logger_info(string.format("login: http_request(headers, body) ok (fields: %s, %s)",
+            type(second), type(third)))
     else
         first_err = tostring(code)
-        ok, code, resp = pcall(nk.http_request, url, "POST", body, headers, 5000)
+        ok, code, second, third = pcall(nk.http_request, url, "POST", body, headers, 5000)
         if ok then
-            nk.logger_info("login: http_request(body, headers) form accepted")
+            nk.logger_info(string.format("login: http_request(body, headers) ok (fields: %s, %s)",
+                type(second), type(third)))
         end
     end
     if not ok then
@@ -70,12 +74,20 @@ local function rpc_login(ctx, payload)
         nk.logger_error("login: " .. detail)
         error({ "login: " .. detail, 14 })
     end
+    local resp = nil
+    if type(third) == "string" and third ~= "" then
+        resp = third
+    elseif type(second) == "string" and second ~= "" then
+        resp = second
+    end
+
     if code ~= 200 then
         nk.logger_error(string.format("login: backend returned %s: %s", tostring(code), tostring(resp)))
         error({ "login: backend rejected the exchange", 14 })
     end
-    if type(resp) ~= "string" or resp == "" then
-        nk.logger_error("login: backend returned an empty body")
+    if resp == nil then
+        nk.logger_error(string.format("login: backend returned no body (fields: %s, %s)",
+            type(second), type(third)))
         error({ "login: backend returned nothing", 13 })
     end
 
