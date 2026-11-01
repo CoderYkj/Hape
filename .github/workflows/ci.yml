@@ -217,59 +217,20 @@ jobs:
   # The last unproven piece of the login path: a real Nakama instance loading the Go
   # plugin and calling the backend. Needs Docker (for Nakama) and therefore cannot be
   # run on the development machine - which is exactly why it lives here.
+  # The one thing that cannot be checked locally: a real Nakama loads the bridge and
+  # calls the backend. Docker is only available here, so this job is the proof.
   nakama:
     runs-on: ubuntu-latest
     env:
-      # The plugin reaches the backend by compose service name, not localhost.
+      # The module reaches the backend by compose service name, not localhost.
       BACKEND_BASE_URL: http://backend:8080
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: nakama/modules/go.mod
-          cache-dependency-path: nakama/modules/go.sum
-
-      # A Go plugin shares type information with the binary that loads it, so the .so
-      # must be built with the same Go toolchain and the same nakama-common version
-      # as the server - otherwise plugin.Open fails and Nakama exits at startup.
-      # Rather than guessing the toolchain, read it out of the server binary.
-      - name: detect the server toolchain
-        run: |
-          ver="$(docker run --rm --entrypoint sh "heroiclabs/nakama:${NAKAMA_VERSION:-3.22.0}" \
-            -c 'grep -a -m1 -oE "go1\.[0-9]+\.[0-9]+" /nakama/nakama' || true)"
-          if [ -z "$ver" ]; then
-            echo "could not detect the Go toolchain inside the Nakama image"
-            exit 1
-          fi
-          echo "server toolchain: $ver"
-          echo "::notice title=server toolchain::$ver"
-          echo "TOOLCHAIN=$ver" >> "$GITHUB_ENV"
-
-      # GOTOOLCHAIN must be exported in the shell, not set through the workflow `env`
-      # expression: variables written to GITHUB_ENV become process environment for
-      # later steps, they are NOT part of the workflow env context. Reading one as an
-      # expression yields an empty string, the build silently falls back to the
-      # setup-go version, and the plugin ends up with a different standard library
-      # than the server - which shows up as "different version of package
-      # internal/goarch" from plugin.Open.
-      - name: build the plugin with the server toolchain
-        working-directory: nakama/modules
-        run: |
-          toolchain="${TOOLCHAIN:-auto}"
-          echo "server toolchain: $toolchain"
-          GOTOOLCHAIN="$toolchain" go version
-          # Fail loudly here rather than at plugin.Open inside Nakama.
-          GOTOOLCHAIN="$toolchain" go version | grep -q "$toolchain" || {
-            echo "the go command did not switch to $toolchain"
-            GOTOOLCHAIN="$toolchain" go env GOVERSION
-            exit 1
-          }
-          mkdir -p ../build
-          GOTOOLCHAIN="$toolchain" go build -buildmode=plugin -o ../build/gamemodule.so .
-          ls -l ../build/gamemodule.so
-          GOTOOLCHAIN="$toolchain" go version > /tmp/plugin-goversion
-          GOTOOLCHAIN="$toolchain" go env CGO_ENABLED GOAMD64 GOOS GOARCH GOEXPERIMENT >> /tmp/plugin-goversion
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
 
       - name: start the stack
         run: docker compose -f deploy/docker-compose.yml up -d --build postgres backend nakama
@@ -291,99 +252,39 @@ jobs:
               psql -U gamebackend -d gamebackend -v ON_ERROR_STOP=1 < "$f"
           done
 
-      # Diagnostics are steps, not log lines. This job cannot be debugged by reading
-      # container output from here, so each hypothesis gets its own step: the step
-      # that fails *is* the diagnosis.
       - name: wait for Nakama to answer
         run: |
           for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:7350/healthcheck >/dev/null; then
-              echo "nakama answered /healthcheck"
-              exit 0
-            fi
+            if curl -fsS http://127.0.0.1:7350/healthcheck >/dev/null; then exit 0; fi
             sleep 2
           done
-          echo "nakama did not answer /healthcheck within 120s (see the diagnose steps)"
+          echo "nakama did not answer /healthcheck; see the diagnostics below"
           exit 1
 
-      - name: diagnose whether the nakama container is still running
+      # Nakama stays healthy even when a runtime module fails to register, so assert
+      # the module's own log line instead of trusting the health endpoint.
+      - name: runtime module loaded
         if: always()
         run: |
-          docker compose -f deploy/docker-compose.yml ps -a
-          cid="$(docker compose -f deploy/docker-compose.yml ps -aq nakama)"
-          state="$(docker inspect --format '{{.State.Status}} exit={{.State.ExitCode}} restarts={{.RestartCount}}' "$cid")"
-          echo "nakama container: $state"
-          docker compose -f deploy/docker-compose.yml logs --no-color --tail 40 nakama
-          # Failing here means the container is gone (startup crash), not slow.
-          case "$state" in
-            running*) echo "container is running"; exit 0 ;;
-            *) echo "container is NOT running - it crashed at startup"; exit 1 ;;
-          esac
-
-      - name: diagnose plugin ABI mismatch in the log
-        if: always()
-        run: |
-          docker compose -f deploy/docker-compose.yml logs --no-color nakama > /tmp/nakama-diag.log || true
-          if grep -qiE "different version of package|plugin was built with|plugin.Open" /tmp/nakama-diag.log; then
-            # Emit the offending line as an annotation: annotations are readable
-            # through the public check-runs API even when job logs are not, which
-            # makes the failure diagnosable without a human copying logs.
-            line="$(grep -iE "different version of package|plugin was built with|plugin.Open" /tmp/nakama-diag.log | head -1)"
-            echo "::error title=plugin ABI::$line"
-            echo "Go plugin ABI mismatch: $line"
-            exit 1
+          docker compose -f deploy/docker-compose.yml logs --no-color nakama > /tmp/nakama.log || true
+          if grep -q "gamemodule loaded" /tmp/nakama.log; then
+            grep "gamemodule loaded" /tmp/nakama.log
+            exit 0
           fi
-          echo "no plugin ABI complaint in the log"
+          echo "::error title=runtime module missing::the Lua module did not register rpc=login"
+          grep -iE "error|fatal|lua|module" /tmp/nakama.log | tail -30 || true
+          exit 1
 
-      - name: diagnose what the server says about itself
-        if: always()
+      - name: login through the module
         run: |
-          docker compose -f deploy/docker-compose.yml logs --no-color --tail 25 nakama || true
-
-      # The plugin compares package hashes, so the two binaries must agree on far
-      # more than the Go version: build settings (CGO, GOAMD64, tags, trimpath) all
-      # change those hashes. Read the server's own buildinfo out of its image and put
-      # both records in annotations - they survive where job logs do not.
-      - name: diagnose build settings of both sides
-        if: always()
-        run: |
-          cid="$(docker create heroiclabs/nakama:${NAKAMA_VERSION:-3.22.0})"
-          docker cp "$cid:/nakama/nakama" /tmp/nakama-bin || true
-          docker rm -f "$cid" >/dev/null 2>&1 || true
-          chmod +x /tmp/nakama-bin 2>/dev/null || true
-
-          echo "=== host (nakama) buildinfo ==="
-          go version -m /tmp/nakama-bin 2>&1 | head -45 || echo "could not read host buildinfo"
-          echo "=== plugin buildinfo ==="
-          go version -m nakama/build/gamemodule.so 2>&1 | head -20 || echo "could not read plugin buildinfo"
-          echo "=== local go env used for the plugin ==="
-          (cd nakama/modules && go env GOOS GOARCH GOAMD64 CGO_ENABLED GOEXPERIMENT GOFLAGS GOVERSION) || true
-
-          # Annotations are the readable channel here: one per oddity, plus a compact
-          # summary of the settings that most often cause a mismatch.
-          host_cgo="$(go version -m /tmp/nakama-bin 2>/dev/null | grep -oE 'CGO_ENABLED=[0-9]' | head -1)"
-          host_amd64="$(go version -m /tmp/nakama-bin 2>/dev/null | grep -oE 'GOAMD64=[^ ]*' | head -1)"
-          host_tags="$(go version -m /tmp/nakama-bin 2>/dev/null | grep -E '^\s+build\s' | head -1)"
-          echo "::notice title=host build settings::${host_cgo:-unknown} ${host_amd64:-unknown} ${host_tags:-no-build-tags}"
-          echo "::notice title=host go version::$(go version /tmp/nakama-bin 2>&1 | head -1)"
-          echo "::notice title=plugin go version::$(cat /tmp/plugin-goversion 2>/dev/null || echo unknown)"
-
-      # A plugin that fails to load leaves Nakama healthy but without the RPC, which
-      # is the classic Go-plugin ABI trap: the .so must be built with the same Go
-      # toolchain and nakama-common version as the server. Assert the log line instead
-      # of trusting the "Nakama is up" signal.
-      - name: plugin loaded
-        run: |
-          docker compose -f deploy/docker-compose.yml logs nakama > /tmp/nakama.log
-          if ! grep -q "gamemodule loaded" /tmp/nakama.log; then
-            echo "the gamemodule plugin did not load; plugin/version-related lines:"
-            grep -iE "plugin|module|nakama-common|version|abi" /tmp/nakama.log | head -40
-            exit 1
+          set -o pipefail
+          go run ./tools/nakama-smoke 2>&1 | tee /tmp/nakama-smoke.log
+          status=$?
+          if [ $status -ne 0 ]; then
+            echo "::error title=nakama smoke::$(tail -5 /tmp/nakama-smoke.log | tr '\n' ' ')"
+            docker compose -f deploy/docker-compose.yml logs --no-color nakama | tail -40 || true
           fi
-          grep "gamemodule loaded" /tmp/nakama.log
-
-      - name: login through the plugin
-        run: go run ./tools/nakama-smoke | tee /tmp/nakama-smoke.log
+          exit $status
 
       - name: the account is really in the backend database
         run: |
@@ -398,12 +299,9 @@ jobs:
       - name: logs on failure
         if: failure()
         run: |
-          echo "=== compose ps ==="
-          docker compose -f deploy/docker-compose.yml ps
-          echo "=== backend ==="
-          docker compose -f deploy/docker-compose.yml logs --no-color backend | tail -60
-          echo "=== nakama ==="
-          docker compose -f deploy/docker-compose.yml logs --no-color nakama | tail -120
+          docker compose -f deploy/docker-compose.yml ps -a
+          docker compose -f deploy/docker-compose.yml logs --no-color backend | tail -40
+          docker compose -f deploy/docker-compose.yml logs --no-color nakama | tail -80
 
       - name: tear down
         if: always()

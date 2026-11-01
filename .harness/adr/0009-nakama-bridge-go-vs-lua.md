@@ -1,6 +1,6 @@
 # ADR 0009 - Nakama 运行时的桥接方式：Go 插件 vs Lua 模块
 
-- 状态：**proposed**（数据收集中：`nakama` CI job 的 buildinfo 诊断）
+- 状态：**accepted**（2026-01-01 拍板：改用 Lua 模块；Go 插件保留为备选，标记未验证）
 - 日期：2026-01-01
 - 关联：ADR 0001（Nakama 负责身份）、spec 0009（Nakama 联调）
 
@@ -47,7 +47,29 @@ Nakama 的桥接 RPC（`login`：把 Nakama session 换成后端 player + token�
 但如果 Go 插件能一次性对齐并且后续不再漂移（例如 CI 从镜像探测工具链 + 锁死依赖版本），
 它的可维护性并不差——本次 CI 已经在做这件事。
 
-## 待定（需要 buildinfo 数据）
+## 决定（2026-01-01）
+
+**用 Lua 模块，Go 插件降级为备选。**
+
+决定性证据来自 CI 里对宿主二进制的 `go version -m`：
+
+```text
+host  : go1.22.4  CGO_ENABLED=1  GOAMD64=v1  build -asmflags="-trimpath /go/build/nakama"
+plugin: go1.22.4
+```
+
+版本、`nakama-common`（v1.32.0）、`protobuf`（v1.34.1）全部对齐后，
+`plugin.Open` 仍报 `different version of package internal/goarch`。原因是插件哈希还包含
+**构建期的 trimpath 绝对路径**——除非把插件放在 `/go/build/nakama` 这个路径下用同一组
+flags 构建（即"在 Nakama 自己的构建容器里编译"），否则无法逐位一致。
+
+对一层 30 行的桥接来说，这个维护负担（每次升级 Nakama 镜像都要重新对齐工具链 + 依赖 +
+构建路径）不成立。Lua 模块没有编译步骤、没有 ABI、且无法拖垮主进程。
+
+`nakama/modules`（Go 插件）保留在仓库里并通过 `nakama-module` job 编译，作为备选路径；
+`tools/nakama-smoke` 与 RPC 契约（`login` → `{player, session_token}`）与实现语言无关。
+
+## 原待定项（已由此决定回答）
 
 - 若失败仅源于 `CGO_ENABLED`/`GOAMD64` 等**一次性设置**：修好并保留 Go 插件，
   同时把对齐规则写成 CI 断言（已部分实现）。
