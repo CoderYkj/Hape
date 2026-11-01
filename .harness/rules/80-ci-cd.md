@@ -19,6 +19,11 @@ CI 除了 `verify` 还有三个 job，专做本机做不了的事：
 | `image` | `docker build` → 非 root 运行 → `/healthz`·`/readyz`·`/metrics` → 断言 uid=10001 |
 | `compose` | `compose up postgres backend` → 迁移 → 35 条探针 → 断言一次登录落库 |
 | `nakama-module` | `go vet`（可移植类型检查）+ `go build -buildmode=plugin`（插件唯一可信的构建方式） |
+| `nakama` | 起 compose 全套（postgres + backend + nakama）→ 迁移 → 断言插件真的被加载 → 用 `tools/nakama-smoke` 走完「Nakama 设备登录 → `login` RPC → 后端账号 → 后端读取」→ 断言 players 表有对应行 |
+
+`nakama` job 的关键是**区分两种失败**：Nakama 起来了但插件没加载（Go plugin ABI 陷阱：
+`.so` 必须与服务器同一 Go 工具链、同一 `nakama-common` 版本）与插件加载了但桥接逻辑错。
+前者靠 grep 日志里的 `gamemodule loaded`，后者靠 smoke 探针的逐步输出。
 
 `-race` 在 CI 必开：这个后端到处是 `sync.Mutex` + map，数据竞争是真实风险，不是洁癖。
 
