@@ -61,11 +61,12 @@ make verify                       # Linux / CI
 
 | 角色 | 入口 |
 |---|---|
+| **先看整体** | `docs/architecture-map.md`：当前架构图（部署 / 对局时序 / 模块 / 结算）+ 未来功能清单，**逐项标注 ✅已验证 / 🟡已实现未验证 / ⬜未实现** |
 | AI Agent | `AGENTS.md` -> `.harness/rules/00-global.md` -> 其余规则按编号 |
-| 新人 | 本文件 -> `docs/architecture.md` -> `docs/runbook-local-dev.md` |
+| 新人 | 本文件 -> `docs/architecture-map.md`（图）-> `docs/architecture.md`（细节）-> `docs/runbook-local-dev.md` |
 | 改接口的人 | `docs/api-contract.md` + `.harness/rules/30-api-contract.md` |
 | 接战斗服的人 | `docs/ue5-ds-integration.md` + `.harness/rules/90-battle-integration.md` |
-| 写客户端的人 | `docs/ue5-client-model.md`（客户端只做四件事 + UE5 转写指引）+ `clients/minimal`（可跑的最小实现） |
+| 写客户端的人 | `docs/ue5-client-model.md`（客户端只做五件事 + UE5 转写指引）+ `clients/minimal`（可跑的最小实现，`CLIENT_FULL=1` 会连真实战斗服） |
 | 要接托管厂商的人 | `docs/edgegap-setup.md`（第一家：控制台要建什么、API 形状、后端配置） |
 | 要部署的人 | `docs/deploy.md`（镜像 / compose / 环境变量 / 探针 / 回滚） |
 | 要连数据库的人 | `docs/postgres-local.md`（本机免安装实例）+ `.harness/adr/0006`（驱动选型待拍板） |
