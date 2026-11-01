@@ -525,12 +525,12 @@ func TestFailedReleaseIsRetriedByTheReconciler(t *testing.T) {
 
 	// The provider recovers; the sweep clears the record.
 	alloc.releaseErr = nil
-	cleared, err := h.app.RetryReleases(context.Background(), 10)
+	result, err := h.app.RetryReleases(context.Background(), 10)
 	if err != nil {
 		t.Fatalf("RetryReleases: %v", err)
 	}
-	if cleared != 1 {
-		t.Fatalf("cleared %d pending releases, want 1", cleared)
+	if result.Cleared != 1 || result.Failed != 0 {
+		t.Fatalf("retry result = %+v, want 1 cleared and 0 failed", result)
 	}
 	if after := memory.byID[id]; after.ReleasePending {
 		t.Fatal("the pending flag survived a successful retry")
@@ -546,8 +546,12 @@ func TestFailedReleaseRetryKeepsCounting(t *testing.T) {
 	h.ready(id)
 	h.expectAfterReport(t, id)
 
-	if _, err := h.app.RetryReleases(context.Background(), 10); err != nil {
+	result, err := h.app.RetryReleases(context.Background(), 10)
+	if err != nil {
 		t.Fatalf("RetryReleases: %v", err)
+	}
+	if result.Failed != 1 || result.Cleared != 0 {
+		t.Fatalf("retry result = %+v, want 1 failed and 0 cleared", result)
 	}
 	memory := h.store.(*Memory)
 	if got := memory.byID[id].ReleaseAttempts; got != 2 {
@@ -564,4 +568,38 @@ func (h *harness) expectAfterReport(t *testing.T, sessionID string) {
 	status, _ := h.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/results",
 		h.report(sessionID), h.auth, "X-Session-Token", h.token)
 	h.expect(status, http.StatusOK, "battle report")
+}
+
+// TestReleaseStatsDescribesTheBacklog is what the gauges are built from: how many, how
+// bad, and how long. A healthy deployment reports zeroes, not an error.
+func TestReleaseStatsDescribesTheBacklog(t *testing.T) {
+	alloc := &fakeAllocator{releaseErr: errors.New("provider still running")}
+	h := newHarness(t, alloc, &fakeSink{})
+
+	healthy, err := h.app.ReleaseStats(context.Background(), time.Now())
+	if err != nil {
+		t.Fatalf("ReleaseStats on an empty backlog: %v", err)
+	}
+	if healthy.Pending != 0 || healthy.MaxAttempts != 0 || healthy.OldestSeconds != 0 {
+		t.Fatalf("empty backlog reported %+v", healthy)
+	}
+
+	id := h.createSession("p_1", "p_2")
+	h.ready(id)
+	h.expectAfterReport(t, id)
+
+	stats, err := h.app.ReleaseStats(context.Background(), time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("ReleaseStats: %v", err)
+	}
+	if stats.Pending != 1 {
+		t.Fatalf("pending = %d, want 1", stats.Pending)
+	}
+	if stats.MaxAttempts != 1 {
+		t.Fatalf("max attempts = %d, want 1 (one failed release)", stats.MaxAttempts)
+	}
+	// The clock is a minute ahead of the session, so the age must be about a minute.
+	if stats.OldestSeconds < 55 || stats.OldestSeconds > 65 {
+		t.Fatalf("oldest = %ds, want ~60s", stats.OldestSeconds)
+	}
 }

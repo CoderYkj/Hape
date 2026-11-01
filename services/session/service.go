@@ -595,29 +595,51 @@ func (s *Service) markReleasePending(ctx context.Context, sessionID string, caus
 	}
 }
 
-// RetryReleases re-attempts the releases no provider ever confirmed, and returns how
-// many it cleared. Safe to run from a timer: releasing an instance that is already gone
-// is a success, so a retry can never make things worse.
+// ReleaseRetryResult is one retry sweep's outcome. It is a struct rather than a bare
+// count because the failure half is a metric, not a detail.
+type ReleaseRetryResult struct {
+	// Cleared is how many releases were confirmed on this pass.
+	Cleared int
+	// Failed is how many are still unconfirmed. A non-zero value that persists is the
+	// signal the alert rule watches.
+	Failed int
+}
+
+// ReleaseStats is the current release backlog: the population, the worst offender, and
+// how long the oldest one has been waiting.
+//
+// It is computed from sessions that are already flagged, so it costs one partial-index
+// scan, and it is allowed to be empty - a healthy deployment has nothing pending.
+type ReleaseStats struct {
+	Pending       int
+	MaxAttempts   int
+	OldestSeconds int64
+}
+
+// RetryReleases re-attempts the releases no provider ever confirmed. Safe to run from a
+// timer: releasing an instance that is already gone is a success, so a retry can never
+// make things worse.
 //
 // This is the only place a billing leak is visible before the invoice: ReleaseAttempts
 // climbing on the same session means the provider is not letting go.
-func (s *Service) RetryReleases(ctx context.Context, limit int) (int, error) {
+func (s *Service) RetryReleases(ctx context.Context, limit int) (ReleaseRetryResult, error) {
 	tracker, ok := s.store.(ReleaseTracker)
 	if !ok {
-		return 0, ErrNoReleaseTracker
+		return ReleaseRetryResult{}, ErrNoReleaseTracker
 	}
 	pending, err := tracker.PendingReleases(ctx, limit)
 	if err != nil {
-		return 0, err
+		return ReleaseRetryResult{}, err
 	}
 
-	cleared := 0
+	result := ReleaseRetryResult{}
 	for _, sp := range pending {
 		if err := s.alloc.Release(ctx, sp.AllocationID); err != nil {
 			s.log.WarnContext(ctx, "release retry failed",
 				"session_id", sp.ID, "allocation_id", sp.AllocationID,
 				"attempts", sp.ReleaseAttempts+1, "err", err)
 			s.markReleasePending(ctx, sp.ID, err)
+			result.Failed++
 			continue
 		}
 		if _, err := s.store.Update(ctx, sp.ID, func(current *Session) error {
@@ -630,7 +652,38 @@ func (s *Service) RetryReleases(ctx context.Context, limit int) (int, error) {
 		}
 		s.log.InfoContext(ctx, "pending release confirmed",
 			"session_id", sp.ID, "allocation_id", sp.AllocationID, "attempts", sp.ReleaseAttempts+1)
-		cleared++
+		result.Cleared++
 	}
-	return cleared, nil
+	return result, nil
+}
+
+// ReleaseStats reports the current release backlog for gauges and alerts.
+//
+// "Oldest" is measured from when the session finished, or from its creation when it
+// never got that far: that is when the release should have happened, so the number is an
+// upper bound on how long a server has been unaccounted for.
+func (s *Service) ReleaseStats(ctx context.Context, now time.Time) (ReleaseStats, error) {
+	tracker, ok := s.store.(ReleaseTracker)
+	if !ok {
+		return ReleaseStats{}, ErrNoReleaseTracker
+	}
+	pending, err := tracker.PendingReleases(ctx, 0)
+	if err != nil {
+		return ReleaseStats{}, err
+	}
+
+	stats := ReleaseStats{Pending: len(pending)}
+	for _, sp := range pending {
+		if sp.ReleaseAttempts > stats.MaxAttempts {
+			stats.MaxAttempts = sp.ReleaseAttempts
+		}
+		since := sp.CreatedAt
+		if sp.FinishedAt != nil {
+			since = *sp.FinishedAt
+		}
+		if seconds := int64(now.Sub(since).Seconds()); seconds > stats.OldestSeconds {
+			stats.OldestSeconds = seconds
+		}
+	}
+	return stats, nil
 }

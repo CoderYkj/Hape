@@ -23,6 +23,18 @@ backend_requests_total{service,op,status}    counter
 backend_start_time_seconds{service}          gauge
 ```
 
+业务指标（由 reconciler 每轮发布，spec 0015）：
+
+```text
+backend_release_pending_sessions{service}        gauge    待确认回收的会话数（健康时 0）
+backend_release_max_attempts{service}            gauge    最严重那场的重试次数
+backend_release_oldest_pending_seconds{service}  gauge    最老待回收的等待时长
+backend_release_failed_total{service}            counter  累计失败的回收重试
+backend_release_confirmed_total{service}         counter  累计成功的回收重试
+```
+
+计数器即使为 0 也会注册：`rate()` 和看板在第一次清扫后就能用，不用等它"先发生过一次"。
+
 新增指标命名规则：`backend_<域>_<单位>`，如 `backend_matchmaking_queue_depth`。
 **基数警告**：不要把 `player_id` 放进 label。
 
@@ -36,12 +48,14 @@ backend_start_time_seconds{service}          gauge
 - `/healthz` 永远不查下游：数据库慢不该让健康进程被杀。
 - `/readyz` 才是查依赖的地方（v0 无依赖，直接 ready）。
 
-## 需要告警的四件事（小团队最小集）
+## 需要告警的五件事（小团队最小集）
 
 1. 5xx 比例 > 1%（5 分钟窗口）。
 2. `session` 中 `allocating` 超过 3 分钟的数量 > 0（分配卡住）。
 3. `session` 中 `ready/in_progress` 超过 30 分钟的数量 > 0（僵尸对局）。
 4. `economy` 出现 `internal` 错误（钱的操作失败一次都值得看）。
+5. `backend_release_pending_sessions > 0` 持续 15 分钟（战斗服回收没被确认——厂商按秒计费，
+   这是唯一在账单之前能看到的信号）。规则文件：`deploy/prometheus/hape.rules.yml`。
 
 ## 调试顺序（线上问题）
 

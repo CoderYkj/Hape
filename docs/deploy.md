@@ -298,3 +298,42 @@ BACKEND_SERVICE_CREDENTIALS="nakama=<old>,nakama-v2=<new>"
 
 **没有 CI 覆盖的部分**：真正的目标主机（systemd 启停、TLS 反代、磁盘与内存水位）、
 镜像仓库的保留策略、跨机器恢复。这些需要一台真机器，见 README 的"未验证"清单。
+
+### 11.8 回收回读的指标与告警
+
+回收失败不是可见的 5xx：它是一条待重试记录（`sessions.release_pending`）。所以它必须
+变成数字，否则"服务器没停、还在计费"只会在账单上出现。
+
+`/metrics` 新增（spec 0015）：
+
+| 指标 | 类型 | 含义 |
+|---|---|---|
+| `backend_release_pending_sessions` | gauge | 当前有多少场会话的回收尚未被确认（健康时恒为 0） |
+| `backend_release_max_attempts` | gauge | 待回收里最严重那场的重试次数（持续增长 = 厂商不放） |
+| `backend_release_oldest_pending_seconds` | gauge | 最老的待回收等了多久（从会话结束算，没结束的从创建算，是上界） |
+| `backend_release_failed_total` | counter | 累计失败的回收重试次数 |
+| `backend_release_confirmed_total` | counter | 累计成功的回收重试次数 |
+
+指标由 reconciler 每一轮发布（`Platform.ReconcileOnce`），所以**必须开启**
+`BACKEND_RECONCILE_INTERVAL`（生产 compose 默认 30s）。没开时这些序列不存在，告警不会
+误报，但也永远不会响——这本身是要在部署检查单里确认的一项。
+
+告警规则在 `deploy/prometheus/hape.rules.yml`（一条）：
+
+```yaml
+- alert: DedicatedServerReleaseStuck
+  expr: backend_release_pending_sessions > 0
+  for: 15m
+```
+
+为什么 15 分钟：厂商通常几秒到几十秒完成销毁，30 次重试仍不消失基本不是"慢"，而是
+"卡住"了。告警后按顺序处理：
+
+1. `backend_release_max_attempts` — 多少次了；
+2. 后端日志 grep `release retry failed`，拿 `allocation_id`；
+3. 去厂商控制台查这个 deployment 的真实状态；必要时手工 `DELETE /v1/stop/{id}`；
+4. 若厂商侧已终止而本地仍 pending，说明回读的判定有问题，先看 `current_status` 的具体取值。
+
+验证方式（不需要真的厂商）：单测 `TestReconcileOncePublishesTheReleaseBacklog` 用一个
+"永远不释放"的假分配器跑完整链路——战报仍 200、会话进 pending、gauge 变 1、恢复后 gauge
+回 0 且 `confirmed_total` +1。

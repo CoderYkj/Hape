@@ -8,6 +8,7 @@ package platform
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -46,6 +47,9 @@ type Config struct {
 	// Authenticator overrides the built-in choice entirely (tests, or a deployment
 	// with its own identity provider).
 	Authenticator httpx.Authenticator
+	// AllocatorOverride replaces the provider built from Allocator. Tests use it to
+	// script a provider that fails to release; production has no reason to.
+	AllocatorOverride battlealloc.Allocator
 	// JWTKey is Nakama's session encryption key. Required when DevAuth is false.
 	JWTKey string
 	// JWTIssuer, when set, is checked against the token's `iss`.
@@ -83,6 +87,7 @@ type Platform struct {
 	pool              *pgxpool.Pool
 	reconcileInterval time.Duration
 	sessionStaleAfter time.Duration
+	metrics           *httpx.Metrics
 
 	Account     *account.Service
 	Team        *team.Service
@@ -103,8 +108,13 @@ func New(cfg Config) (*Platform, error) {
 		return nil, fmt.Errorf("platform: refusing to start in prod with dev auth")
 	}
 
-	alloc := battlealloc.New(cfg.Allocator)
-	if cfg.Allocator == "edgegap" {
+	// The override exists so a test can script "the provider will not let go" without a
+	// vendor account; production always goes through the name.
+	alloc := cfg.AllocatorOverride
+	if alloc != nil {
+		log.Info("allocator selected", "provider", alloc.Provider(), "override", true)
+	} else if cfg.Allocator == "edgegap" {
+		alloc = battlealloc.New(cfg.Allocator)
 		edgegapCfg := battlealloc.EdgegapConfig{
 			Token:   cfg.EdgegapToken,
 			AppName: cfg.EdgegapApp,
@@ -123,6 +133,7 @@ func New(cfg Config) (*Platform, error) {
 		alloc = edgegap
 		log.Info("allocator selected", "provider", "edgegap", "app", cfg.EdgegapApp)
 	} else {
+		alloc = battlealloc.New(cfg.Allocator)
 		log.Info("allocator selected", "provider", alloc.Provider())
 	}
 
@@ -252,6 +263,7 @@ func New(cfg Config) (*Platform, error) {
 	}
 	router := httpx.NewRouter("platform", log, auth)
 	p.router = router
+	p.metrics = router.Metrics()
 
 	p.Account = account.NewWithStore(log.With("domain", "account"), accountStore)
 	if playerMinter != nil {
@@ -327,25 +339,8 @@ func (p *Platform) RunReconciler(ctx context.Context) {
 			p.log.Info("reconciler stopped")
 			return
 		case now := <-ticker.C:
-			expired, err := p.Session.ExpireStale(ctx, now, p.sessionStaleAfter)
-			if err != nil {
+			if err := p.ReconcileOnce(ctx, now); err != nil {
 				p.log.Error("reconcile sweep failed", "err", err)
-				continue
-			}
-			if len(expired) > 0 {
-				p.log.Warn("expired stale sessions", "count", len(expired))
-			}
-
-			// Servers whose release was never confirmed. Retried here rather than in the
-			// request path: a provider that is slow to let go must not slow down a
-			// player's settlement, and this is the only place the leak is visible.
-			cleared, err := p.Session.RetryReleases(ctx, pendingReleasesPerTick)
-			if err != nil {
-				p.log.Error("release retry sweep failed", "err", err)
-				continue
-			}
-			if cleared > 0 {
-				p.log.Info("pending releases confirmed", "count", cleared)
 			}
 		}
 	}
@@ -354,5 +349,48 @@ func (p *Platform) RunReconciler(ctx context.Context) {
 // pendingReleasesPerTick bounds one retry sweep. A backlog is worked through over
 // several ticks instead of holding the ticker hostage on a slow provider.
 const pendingReleasesPerTick = 25
+
+// ReconcileOnce runs one sweep: fail sessions that sat too long, retry the releases no
+// provider confirmed, then publish the backlog.
+//
+// Exported so a test - or an operator with a shell - can trigger one pass without
+// waiting for the ticker.
+func (p *Platform) ReconcileOnce(ctx context.Context, now time.Time) error {
+	expired, err := p.Session.ExpireStale(ctx, now, p.sessionStaleAfter)
+	switch {
+	case errors.Is(err, session.ErrNoExpirer):
+		// A store that cannot scan is a configuration fact, not a failure: still retry
+		// the releases, which only needs the pending rows.
+		p.log.Warn("session store cannot sweep stale sessions")
+	case err != nil:
+		return fmt.Errorf("expire stale sessions: %w", err)
+	case len(expired) > 0:
+		p.log.Warn("expired stale sessions", "count", len(expired))
+	}
+
+	// Servers whose release was never confirmed. Retried here rather than in the request
+	// path: a provider that is slow to let go must not slow down a player's settlement.
+	result, err := p.Session.RetryReleases(ctx, pendingReleasesPerTick)
+	if err != nil {
+		return fmt.Errorf("retry releases: %w", err)
+	}
+	if result.Cleared > 0 {
+		p.log.Info("pending releases confirmed", "count", result.Cleared)
+	}
+
+	// The backlog is published as numbers, not sentences: an alert watches a gauge, and
+	// "servers we cannot confirm stopped" is the kind of thing that must page before an
+	// invoice does.
+	stats, err := p.Session.ReleaseStats(ctx, now)
+	if err != nil {
+		return fmt.Errorf("release stats: %w", err)
+	}
+	p.metrics.AddCounter("release_confirmed", int64(result.Cleared))
+	p.metrics.AddCounter("release_failed", int64(result.Failed))
+	p.metrics.SetGauge("release_pending_sessions", float64(stats.Pending))
+	p.metrics.SetGauge("release_max_attempts", float64(stats.MaxAttempts))
+	p.metrics.SetGauge("release_oldest_pending_seconds", float64(stats.OldestSeconds))
+	return nil
+}
 
 func (p *Platform) ready(context.Context) error { return nil }

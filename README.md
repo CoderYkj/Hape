@@ -94,7 +94,7 @@ api/openapi/    生成的接口契约（勿手改）
 db/migrations/  Postgres schema（0001+0002，已在 16.4 上执行；7 个域已接线）
 db/probes/      schema 约束的断言脚本（41 条，psql 可重跑）
 nakama/         Nakama Go 模块（RPC 桥接，未验证）
-deploy/         dev compose + 生产 compose（prod 用占位密钥拒绝启动）+ systemd 单元
+deploy/         dev compose + 生产 compose（prod 用占位密钥拒绝启动）+ systemd 单元 + prometheus 告警规则
 Dockerfile      后端镜像：多阶段构建，alpine + 非 root 静态二进制（CI 构建并探活）
 Dockerfile.ds   战斗服镜像：同一套构建约束，udp 7777（CI 构建并在容器里打一局）
 .dockerignore   构建上下文收敛到 Go 源码（刻意不含 .git）

@@ -45,6 +45,10 @@ func NewRouter(service string, log *slog.Logger, auth Authenticator) *Router {
 	}
 }
 
+// Metrics returns the registry this router publishes. Domain services use it to add
+// counters and gauges to the same /metrics endpoint.
+func (r *Router) Metrics() *Metrics { return r.metrics }
+
 // Service is the owning service name, used in logs and metrics.
 func (r *Router) Service() string { return r.service }
 

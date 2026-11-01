@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"gamebackend/pkg/battlealloc"
 	"gamebackend/platform"
 )
 
@@ -133,4 +137,196 @@ func sessionState(t *testing.T, baseURL, sessionID string) string {
 		t.Fatalf("decode session (status %d): %v", resp.StatusCode, err)
 	}
 	return decoded.Session.State
+}
+
+// stubAllocator scripts the one thing a test cannot ask a vendor for: a provider that
+// hands out servers and then refuses to let go.
+type stubAllocator struct {
+	failRelease bool
+}
+
+func (s *stubAllocator) Provider() string { return "stub" }
+
+func (s *stubAllocator) Allocate(_ context.Context, req battlealloc.Request) (battlealloc.Allocation, error) {
+	return battlealloc.Allocation{
+		ID:       "alloc-" + req.SessionID,
+		Provider: "stub",
+		Address:  "127.0.0.1",
+		Port:     7777,
+	}, nil
+}
+
+func (s *stubAllocator) Release(context.Context, string) error {
+	if s.failRelease {
+		return errors.New("provider still running")
+	}
+	return nil
+}
+
+// TestReconcileOncePublishesTheReleaseBacklog is the end of the billing story: a release
+// that fails is retried, and the backlog becomes numbers an alert can watch. Without the
+// gauges, "we cannot confirm some servers stopped" only exists in a log nobody pages on.
+func TestReconcileOncePublishesTheReleaseBacklog(t *testing.T) {
+	alloc := &stubAllocator{failRelease: true}
+	app := newAppWith(t, platform.Config{
+		Env:               "test",
+		DevAuth:           true,
+		Allocator:         "local",
+		AllocatorOverride: alloc,
+	})
+	server := httptest.NewServer(app.Handler())
+	t.Cleanup(server.Close)
+
+	sessionID, runtimeToken := createSessionWithToken(t, server.URL, "m_metrics")
+	markReady(t, server.URL, sessionID, runtimeToken)
+	reportResult(t, server.URL, sessionID, runtimeToken)
+
+	if err := app.ReconcileOnce(context.Background(), time.Now()); err != nil {
+		t.Fatalf("ReconcileOnce: %v", err)
+	}
+
+	body := scrapeMetrics(t, server.URL)
+	for _, want := range []string{
+		// One session is stuck; it failed once at report time and once on the sweep.
+		`backend_release_pending_sessions{service="platform"} 1`,
+		`backend_release_max_attempts{service="platform"} 2`,
+		`backend_release_failed_total{service="platform"} 1`,
+		`backend_release_confirmed_total{service="platform"} 0`,
+		`backend_release_oldest_pending_seconds{service="platform"}`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics are missing %q:\n%s", want, body)
+		}
+	}
+
+	// The provider recovers: the next sweep clears the backlog, and the gauge must drop
+	// to zero rather than staying at its high-water mark.
+	alloc.failRelease = false
+	if err := app.ReconcileOnce(context.Background(), time.Now()); err != nil {
+		t.Fatalf("ReconcileOnce (recovered): %v", err)
+	}
+	body = scrapeMetrics(t, server.URL)
+	if !strings.Contains(body, `backend_release_pending_sessions{service="platform"} 0`) {
+		t.Fatalf("the backlog gauge did not clear:\n%s", body)
+	}
+	if !strings.Contains(body, `backend_release_confirmed_total{service="platform"} 1`) {
+		t.Fatalf("the confirmed counter did not move:\n%s", body)
+	}
+}
+
+func createSessionWithToken(t *testing.T, baseURL, matchID string) (sessionID, runtimeToken string) {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"match_id": matchID,
+		"players":  []string{"p_1", "p_2"},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/v1/session/sessions", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer dev-service")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var decoded struct {
+		Session struct {
+			ID string `json:"id"`
+		} `json:"session"`
+		RuntimeToken string `json:"runtime_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		t.Fatalf("decode create response (status %d): %v", resp.StatusCode, err)
+	}
+	if decoded.Session.ID == "" || decoded.RuntimeToken == "" {
+		t.Fatalf("create session: empty id or token (status %d)", resp.StatusCode)
+	}
+	return decoded.Session.ID, decoded.RuntimeToken
+}
+
+func markReady(t *testing.T, baseURL, sessionID, runtimeToken string) {
+	t.Helper()
+	postAs(t, baseURL, "/v1/session/sessions/"+sessionID+"/ready", runtimeToken, map[string]any{"port": 7777})
+}
+
+func reportResult(t *testing.T, baseURL, sessionID, runtimeToken string) {
+	t.Helper()
+	postAs(t, baseURL, "/v1/session/sessions/"+sessionID+"/results", runtimeToken, map[string]any{
+		"result_id":        "res-" + sessionID,
+		"duration_seconds": 60,
+		"players": []map[string]any{
+			{"player_id": "p_1", "won": true, "score": 500},
+			{"player_id": "p_2", "won": false, "score": 100},
+		},
+	})
+}
+
+func postAs(t *testing.T, baseURL, path, runtimeToken string, payload map[string]any) {
+	t.Helper()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, baseURL+path, bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer dev-service")
+	req.Header.Set("X-Session-Token", runtimeToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post %s: %v", path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("post %s: status %d: %s", path, resp.StatusCode, body)
+	}
+}
+
+func scrapeMetrics(t *testing.T, baseURL string) string {
+	t.Helper()
+	resp, err := http.Get(baseURL + "/metrics")
+	if err != nil {
+		t.Fatalf("get metrics: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read metrics: %v", err)
+	}
+	return string(body)
+}
+
+// TestAlertRuleWatchesAMetricWePublish keeps the alert file and the code from drifting:
+// a rule on a metric nobody publishes is an alarm that can never fire, which is worse
+// than no alarm because it looks like coverage.
+func TestAlertRuleWatchesAMetricWePublish(t *testing.T) {
+	raw, err := os.ReadFile("../deploy/prometheus/hape.rules.yml")
+	if err != nil {
+		t.Fatalf("read rules: %v", err)
+	}
+	want := "expr: backend_release_pending_sessions > 0"
+	if !strings.Contains(string(raw), want) {
+		t.Fatalf("the alert rule does not contain %q:\n%s", want, raw)
+	}
+
+	app := newAppWith(t, platform.Config{Env: "test", DevAuth: true, Allocator: "local"})
+	server := httptest.NewServer(app.Handler())
+	t.Cleanup(server.Close)
+	if err := app.ReconcileOnce(context.Background(), time.Now()); err != nil {
+		t.Fatalf("ReconcileOnce: %v", err)
+	}
+	// The metric the rule watches must actually be in the exposition, otherwise the rule
+	// silently matches nothing.
+	if body := scrapeMetrics(t, server.URL); !strings.Contains(body, "backend_release_pending_sessions{") {
+		t.Fatalf("the watched metric is not published:\n%s", body)
+	}
 }
