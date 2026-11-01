@@ -268,6 +268,8 @@ jobs:
           mkdir -p ../build
           GOTOOLCHAIN="$toolchain" go build -buildmode=plugin -o ../build/gamemodule.so .
           ls -l ../build/gamemodule.so
+          GOTOOLCHAIN="$toolchain" go version > /tmp/plugin-goversion
+          GOTOOLCHAIN="$toolchain" go env CGO_ENABLED GOAMD64 GOOS GOARCH GOEXPERIMENT >> /tmp/plugin-goversion
 
       - name: start the stack
         run: docker compose -f deploy/docker-compose.yml up -d --build postgres backend nakama
@@ -336,10 +338,35 @@ jobs:
       - name: diagnose what the server says about itself
         if: always()
         run: |
-          docker compose -f deploy/docker-compose.yml logs --no-color --tail 25 nakama
-          # Surface the server's Go toolchain, so a later plugin build can match it.
-          docker compose -f deploy/docker-compose.yml exec -T nakama sh -c \
-            'strings /nakama/nakama 2>/dev/null | grep -m1 -oE "go1\.[0-9]+\.[0-9]+" || echo "go version not detectable"' || true
+          docker compose -f deploy/docker-compose.yml logs --no-color --tail 25 nakama || true
+
+      # The plugin compares package hashes, so the two binaries must agree on far
+      # more than the Go version: build settings (CGO, GOAMD64, tags, trimpath) all
+      # change those hashes. Read the server's own buildinfo out of its image and put
+      # both records in annotations - they survive where job logs do not.
+      - name: diagnose build settings of both sides
+        if: always()
+        run: |
+          cid="$(docker create heroiclabs/nakama:${NAKAMA_VERSION:-3.22.0})"
+          docker cp "$cid:/nakama/nakama" /tmp/nakama-bin || true
+          docker rm -f "$cid" >/dev/null 2>&1 || true
+          chmod +x /tmp/nakama-bin 2>/dev/null || true
+
+          echo "=== host (nakama) buildinfo ==="
+          go version -m /tmp/nakama-bin 2>&1 | head -45 || echo "could not read host buildinfo"
+          echo "=== plugin buildinfo ==="
+          go version -m nakama/build/gamemodule.so 2>&1 | head -20 || echo "could not read plugin buildinfo"
+          echo "=== local go env used for the plugin ==="
+          (cd nakama/modules && go env GOOS GOARCH GOAMD64 CGO_ENABLED GOEXPERIMENT GOFLAGS GOVERSION) || true
+
+          # Annotations are the readable channel here: one per oddity, plus a compact
+          # summary of the settings that most often cause a mismatch.
+          host_cgo="$(go version -m /tmp/nakama-bin 2>/dev/null | grep -oE 'CGO_ENABLED=[0-9]' | head -1)"
+          host_amd64="$(go version -m /tmp/nakama-bin 2>/dev/null | grep -oE 'GOAMD64=[^ ]*' | head -1)"
+          host_tags="$(go version -m /tmp/nakama-bin 2>/dev/null | grep -E '^\s+build\s' | head -1)"
+          echo "::notice title=host build settings::${host_cgo:-unknown} ${host_amd64:-unknown} ${host_tags:-no-build-tags}"
+          echo "::notice title=host go version::$(go version /tmp/nakama-bin 2>&1 | head -1)"
+          echo "::notice title=plugin go version::$(cat /tmp/plugin-goversion 2>/dev/null || echo unknown)"
 
       # A plugin that fails to load leaves Nakama healthy but without the RPC, which
       # is the classic Go-plugin ABI trap: the .so must be built with the same Go
