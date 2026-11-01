@@ -257,15 +257,53 @@ jobs:
               psql -U gamebackend -d gamebackend -v ON_ERROR_STOP=1 < "$f"
           done
 
-      - name: wait for Nakama
+      # Diagnostics are steps, not log lines. This job cannot be debugged by reading
+      # container output from here, so each hypothesis gets its own step: the step
+      # that fails *is* the diagnosis.
+      - name: wait for Nakama to answer
         run: |
           for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:7350/healthcheck; then exit 0; fi
+            if curl -fsS http://127.0.0.1:7350/healthcheck >/dev/null; then
+              echo "nakama answered /healthcheck"
+              exit 0
+            fi
             sleep 2
           done
-          echo "nakama never became healthy"
-          docker compose -f deploy/docker-compose.yml logs nakama
+          echo "nakama did not answer /healthcheck within 120s (see the diagnose steps)"
           exit 1
+
+      - name: diagnose: is the nakama container still running
+        if: always()
+        run: |
+          docker compose -f deploy/docker-compose.yml ps -a
+          cid="$(docker compose -f deploy/docker-compose.yml ps -aq nakama)"
+          state="$(docker inspect --format '{{.State.Status}} exit={{.State.ExitCode}} restarts={{.RestartCount}}' "$cid")"
+          echo "nakama container: $state"
+          docker compose -f deploy/docker-compose.yml logs --no-color --tail 40 nakama
+          # Failing here means the container is gone (startup crash), not slow.
+          case "$state" in
+            running*) echo "container is running"; exit 0 ;;
+            *) echo "container is NOT running - it crashed at startup"; exit 1 ;;
+          esac
+
+      - name: diagnose: plugin ABI mismatch in the log
+        if: always()
+        run: |
+          docker compose -f deploy/docker-compose.yml logs --no-color nakama > /tmp/nakama-diag.log || true
+          if grep -qiE "different version of package|plugin was built with|plugin.Open" /tmp/nakama-diag.log; then
+            echo "Go plugin ABI mismatch: the .so must be built with the same Go toolchain and nakama-common version as the server"
+            grep -iE "different version of package|plugin was built with|plugin.Open" /tmp/nakama-diag.log | head -5
+            exit 1
+          fi
+          echo "no plugin ABI complaint in the log"
+
+      - name: diagnose: what does the server say about itself
+        if: always()
+        run: |
+          docker compose -f deploy/docker-compose.yml logs --no-color --tail 25 nakama
+          # Surface the server's Go toolchain, so a later plugin build can match it.
+          docker compose -f deploy/docker-compose.yml exec -T nakama sh -c \
+            'strings /nakama/nakama 2>/dev/null | grep -m1 -oE "go1\.[0-9]+\.[0-9]+" || echo "go version not detectable"' || true
 
       # A plugin that fails to load leaves Nakama healthy but without the RPC, which
       # is the classic Go-plugin ABI trap: the .so must be built with the same Go
