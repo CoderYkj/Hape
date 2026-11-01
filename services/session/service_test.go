@@ -27,6 +27,9 @@ const serviceToken = "dev-service"
 type fakeAllocator struct {
 	fail     bool
 	released []string
+	// releaseErr makes the next release fail, which is how "the provider did not let go"
+	// is scripted. Nil means a release succeeds.
+	releaseErr error
 }
 
 func (f *fakeAllocator) Provider() string { return "fake" }
@@ -43,7 +46,7 @@ func (f *fakeAllocator) Release(_ context.Context, allocationID string) error {
 		return errors.New("release called without an allocation id")
 	}
 	f.released = append(f.released, allocationID)
-	return nil
+	return f.releaseErr
 }
 
 // fakeSink is the fan-out boundary: it can be broken and then repaired, which
@@ -488,4 +491,77 @@ func TestSessionGetByMatchIsTheClientReadPath(t *testing.T) {
 
 	status, _ = h.do(http.MethodGet, "/v1/session/sessions/by-match/m_unknown", nil, "dev-player-p_1")
 	h.expect(status, http.StatusNotFound, "a match that was never allocated")
+}
+
+// TestFailedReleaseIsRetriedByTheReconciler covers the billing path: the report is
+// accepted, the server will not let go, and the failure is recorded instead of logged
+// and forgotten. A successful retry clears it.
+func TestFailedReleaseIsRetriedByTheReconciler(t *testing.T) {
+	alloc := &fakeAllocator{releaseErr: errors.New("provider still running")}
+	h := newHarness(t, alloc, &fakeSink{})
+
+	id := h.createSession("p_1", "p_2")
+	h.ready(id)
+
+	// The report must still be accepted: a provider that is slow to release cannot be
+	// allowed to fail a player's settlement.
+	status, body := h.do(http.MethodPost, "/v1/session/sessions/"+id+"/results", h.report(id), h.auth, "X-Session-Token", h.token)
+	h.expect(status, http.StatusOK, "report while the release is failing")
+	if applied, _ := nested(t, body, "applied").(bool); !applied {
+		t.Fatal("the report should have been applied")
+	}
+
+	memory, ok := h.store.(*Memory)
+	if !ok {
+		t.Fatalf("harness store is %T, want *Memory", h.store)
+	}
+	pending := memory.byID[id]
+	if !pending.ReleasePending {
+		t.Fatal("a failed release was not recorded as pending")
+	}
+	if pending.ReleaseAttempts != 1 {
+		t.Fatalf("release attempts = %d, want 1", pending.ReleaseAttempts)
+	}
+
+	// The provider recovers; the sweep clears the record.
+	alloc.releaseErr = nil
+	cleared, err := h.app.RetryReleases(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RetryReleases: %v", err)
+	}
+	if cleared != 1 {
+		t.Fatalf("cleared %d pending releases, want 1", cleared)
+	}
+	if after := memory.byID[id]; after.ReleasePending {
+		t.Fatal("the pending flag survived a successful retry")
+	}
+}
+
+// TestFailedReleaseRetryKeepsCounting pins the counter that makes a persistent leak
+// visible: the same session failing twice must read as two attempts, not one.
+func TestFailedReleaseRetryKeepsCounting(t *testing.T) {
+	alloc := &fakeAllocator{releaseErr: errors.New("provider still running")}
+	h := newHarness(t, alloc, &fakeSink{})
+	id := h.createSession("p_1", "p_2")
+	h.ready(id)
+	h.expectAfterReport(t, id)
+
+	if _, err := h.app.RetryReleases(context.Background(), 10); err != nil {
+		t.Fatalf("RetryReleases: %v", err)
+	}
+	memory := h.store.(*Memory)
+	if got := memory.byID[id].ReleaseAttempts; got != 2 {
+		t.Fatalf("release attempts = %d, want 2 (the first failure plus one retry)", got)
+	}
+	if !memory.byID[id].ReleasePending {
+		t.Fatal("a still-failing release must stay pending")
+	}
+}
+
+// expectAfterReport posts a battle report and requires it to be accepted.
+func (h *harness) expectAfterReport(t *testing.T, sessionID string) {
+	t.Helper()
+	status, _ := h.do(http.MethodPost, "/v1/session/sessions/"+sessionID+"/results",
+		h.report(sessionID), h.auth, "X-Session-Token", h.token)
+	h.expect(status, http.StatusOK, "battle report")
 }

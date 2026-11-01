@@ -37,6 +37,10 @@ func (s *PG) Create(ctx context.Context, session Session) (Session, error) {
 	if session.CreatedAt.IsZero() {
 		session.CreatedAt = time.Now().UTC()
 	}
+	// A brand new session has nothing to release yet; the columns default to it, and
+	// the memory store normalises the same way so the two cannot drift.
+	session.ReleasePending = false
+	session.ReleaseAttempts = 0
 
 	err := pg.InTx(ctx, s.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx,
@@ -106,11 +110,13 @@ func (s *PG) Update(ctx context.Context, id string, mutate func(*Session) error)
 		if _, err := tx.Exec(ctx,
 			`UPDATE sessions SET
 			     state = $2, allocation_id = $3, provider = $4, address = $5, port = $6,
-			     result_id = $7, ready_at = $8, finished_at = $9, runtime_token = $10
+			     result_id = $7, ready_at = $8, finished_at = $9, runtime_token = $10,
+			     release_pending = $11, release_attempts = $12
 			   WHERE id = $1`,
 			current.ID, current.State, nullify(current.AllocationID), nullify(current.Provider),
 			nullify(current.Address), nullifyPort(current.Port), nullify(current.ResultID),
-			current.ReadyAt, current.FinishedAt, nullify(current.RuntimeToken)); err != nil {
+			current.ReadyAt, current.FinishedAt, nullify(current.RuntimeToken),
+			current.ReleasePending, current.ReleaseAttempts); err != nil {
 			if pg.IsCheckViolation(err) {
 				// e.g. finished without a result id: the schema refuses a state the
 				// Go state machine should never have produced.
@@ -128,6 +134,39 @@ func (s *PG) Update(ctx context.Context, id string, mutate func(*Session) error)
 	return result, nil
 }
 
+// PendingReleases implements ReleaseTracker.
+func (s *PG) PendingReleases(ctx context.Context, limit int) ([]Session, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
+	query := `SELECT id, match_id, state, queue, region, map,
+	                 coalesce(allocation_id, ''), coalesce(provider, ''), coalesce(address, ''),
+	                 coalesce(port, 0), coalesce(result_id, ''), coalesce(runtime_token, ''), created_at, ready_at, finished_at,
+	                 release_pending, release_attempts
+	            FROM sessions WHERE release_pending
+	           ORDER BY created_at, id`
+	args := []any{}
+	if limit > 0 {
+		query += ` LIMIT $1`
+		args = append(args, limit)
+	}
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	pending := []Session{}
+	for rows.Next() {
+		session, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		pending = append(pending, session)
+	}
+	return pending, rows.Err()
+}
+
 // ExpireStale implements Expirer.
 //
 // Only allocating and ready are swept: an in_progress match may legitimately be
@@ -143,7 +182,8 @@ func (s *PG) ExpireStale(ctx context.Context, before time.Time) ([]Session, erro
 		  WHERE state IN ($3, $4) AND created_at < $1
 		  RETURNING id, match_id, state, queue, region, map, coalesce(allocation_id, ''),
 		            coalesce(provider, ''), coalesce(address, ''), coalesce(port, 0),
-		            coalesce(result_id, ''), coalesce(runtime_token, ''), created_at, ready_at, finished_at`,
+		            coalesce(result_id, ''), coalesce(runtime_token, ''), created_at, ready_at, finished_at,
+		            release_pending, release_attempts`,
 		before, StateFailed, StateAllocating, StateReady)
 	if err != nil {
 		return nil, err
@@ -176,7 +216,8 @@ func (s *PG) get(ctx context.Context, db pg.DB, id string, forUpdate bool) (Sess
 func (s *PG) getBy(ctx context.Context, db pg.DB, column, value string, forUpdate bool) (Session, error) {
 	query := `SELECT id, match_id, state, queue, region, map,
 	                 coalesce(allocation_id, ''), coalesce(provider, ''), coalesce(address, ''),
-	                 coalesce(port, 0), coalesce(result_id, ''), coalesce(runtime_token, ''), created_at, ready_at, finished_at
+	                 coalesce(port, 0), coalesce(result_id, ''), coalesce(runtime_token, ''), created_at, ready_at, finished_at,
+	                 release_pending, release_attempts
 	            FROM sessions WHERE ` + column + ` = $1`
 	if forUpdate {
 		query += ` FOR UPDATE`
@@ -189,7 +230,8 @@ func (s *PG) getBy(ctx context.Context, db pg.DB, column, value string, forUpdat
 	err := db.QueryRow(ctx, query, value).Scan(
 		&session.ID, &session.MatchID, &session.State, &session.Queue, &session.Region, &session.Map,
 		&session.AllocationID, &session.Provider, &session.Address, &session.Port, &session.ResultID,
-		&session.RuntimeToken, &createdAt, &session.ReadyAt, &session.FinishedAt)
+		&session.RuntimeToken, &createdAt, &session.ReadyAt, &session.FinishedAt,
+		&session.ReleasePending, &session.ReleaseAttempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if column == "match_id" {
 			return Session{}, apierr.NotFound("no session for this match").WithDetail("match_id", value)
@@ -231,7 +273,8 @@ func scanSession(row scanner) (Session, error) {
 	if err := row.Scan(
 		&session.ID, &session.MatchID, &session.State, &session.Queue, &session.Region, &session.Map,
 		&session.AllocationID, &session.Provider, &session.Address, &session.Port, &session.ResultID,
-		&session.RuntimeToken, &createdAt, &session.ReadyAt, &session.FinishedAt); err != nil {
+		&session.RuntimeToken, &createdAt, &session.ReadyAt, &session.FinishedAt,
+		&session.ReleasePending, &session.ReleaseAttempts); err != nil {
 		return Session{}, err
 	}
 	session.CreatedAt = createdAt.UTC()
@@ -253,7 +296,10 @@ func nullifyPort(port int) *int {
 	return &port
 }
 
-var _ Expirer = (*PG)(nil)
+var (
+	_ Expirer        = (*PG)(nil)
+	_ ReleaseTracker = (*PG)(nil)
+)
 
 // RecordResult implements ResultRecorder.
 //

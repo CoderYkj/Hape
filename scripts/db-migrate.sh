@@ -28,6 +28,24 @@ psql -v ON_ERROR_STOP=1 -q -c \
   'CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())' \
   "$DATABASE_URL"
 
+# "CREATE TABLE IF NOT EXISTS" is happy with a table of the right name and the wrong
+# shape, and then every later query fails with "column checksum does not exist". A
+# bookkeeping table this script did not create is a real situation (a hand-built
+# database, an older tool), so say what is wrong instead of failing three lines later.
+# Column order is not a contract; having the three columns is.
+missing="$(psql -tAc \
+  "SELECT string_agg(req.name, ', ') FROM (VALUES ('version'), ('checksum'), ('applied_at')) AS req(name)
+    WHERE req.name NOT IN (
+      SELECT column_name FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = 'schema_migrations')" "$DATABASE_URL")"
+if [ -n "$missing" ]; then
+  echo "schema_migrations is missing: $missing" >&2
+  echo "this script needs (version, checksum, applied_at). If the table was built by hand," >&2
+  echo "add the missing column and backfill its checksums (sha256 of each migration file)," >&2
+  echo "or drop the table and re-apply every migration against an empty database." >&2
+  exit 1
+fi
+
 applied=0
 skipped=0
 

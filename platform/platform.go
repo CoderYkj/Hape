@@ -335,8 +335,24 @@ func (p *Platform) RunReconciler(ctx context.Context) {
 			if len(expired) > 0 {
 				p.log.Warn("expired stale sessions", "count", len(expired))
 			}
+
+			// Servers whose release was never confirmed. Retried here rather than in the
+			// request path: a provider that is slow to let go must not slow down a
+			// player's settlement, and this is the only place the leak is visible.
+			cleared, err := p.Session.RetryReleases(ctx, pendingReleasesPerTick)
+			if err != nil {
+				p.log.Error("release retry sweep failed", "err", err)
+				continue
+			}
+			if cleared > 0 {
+				p.log.Info("pending releases confirmed", "count", cleared)
+			}
 		}
 	}
 }
+
+// pendingReleasesPerTick bounds one retry sweep. A backlog is worked through over
+// several ticks instead of holding the ticker hostage on a slow provider.
+const pendingReleasesPerTick = 25
 
 func (p *Platform) ready(context.Context) error { return nil }

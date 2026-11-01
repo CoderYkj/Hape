@@ -180,6 +180,43 @@ func TestStoresAgree(t *testing.T) {
 				}
 			}
 
+			// The release read-back columns must round-trip, and the tracker must find
+			// the row: a lost column means a silently dropped retry.
+			if _, err := tc.store.Update(ctx, created.ID, func(sp *session.Session) error {
+				sp.ReleasePending = true
+				sp.ReleaseAttempts = 2
+				return nil
+			}); err != nil {
+				t.Fatalf("mark release pending: %v", err)
+			}
+			tracker, ok := tc.store.(session.ReleaseTracker)
+			if !ok {
+				t.Fatalf("%s store does not implement ReleaseTracker", tc.name)
+			}
+			pendingReleases, err := tracker.PendingReleases(ctx, 0)
+			if err != nil {
+				t.Fatalf("pending releases: %v", err)
+			}
+			seen := false
+			for _, sp := range pendingReleases {
+				if sp.ID != created.ID {
+					continue
+				}
+				seen = true
+				if sp.ReleaseAttempts != 2 {
+					t.Fatalf("release attempts = %d, want 2", sp.ReleaseAttempts)
+				}
+			}
+			if !seen {
+				t.Fatalf("the pending session is missing from %d pending releases", len(pendingReleases))
+			}
+			if _, err := tc.store.Update(ctx, created.ID, func(sp *session.Session) error {
+				sp.ReleasePending = false
+				return nil
+			}); err != nil {
+				t.Fatalf("clear release pending: %v", err)
+			}
+
 			// A finished session is not stale, however old it looks.
 			expirer, ok := tc.store.(session.Expirer)
 			if !ok {

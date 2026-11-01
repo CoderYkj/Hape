@@ -17,7 +17,7 @@ CI 除了 `verify` 还有三个 job，专做本机做不了的事：
 | job | 内容 |
 |---|---|
 | `image` | `docker build` → 非 root 运行 → `/healthz`·`/readyz`·`/metrics` → 断言 uid=10001 |
-| `compose` | `compose up postgres backend` → 迁移 → 35 条探针 → 断言一次登录落库 |
+| `compose` | `compose up postgres backend` → 迁移 → 41 条探针 → 断言一次登录落库 |
 | `nakama-module` | `go vet`（可移植类型检查）+ `go build -buildmode=plugin`（插件唯一可信的构建方式） |
 | `nakama` | 起 compose 全套（postgres + backend + nakama）→ 迁移 → 断言插件真的被加载 → 用 `tools/nakama-smoke` 走完「Nakama 设备登录 → `login` RPC → 后端账号 → 后端读取」→ 断言 players 表有对应行 |
 

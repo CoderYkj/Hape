@@ -60,7 +60,7 @@ scripts\pg-local.cmd -Action probe     # 跑 db/probes/*.probe.sql
 应用文件和记录版本是两条语句，不在一个事务里。生产环境要么用成熟工具，要么把
 "应用 + 记账"包进一个事务（见 `docs/deploy.md` 第 7 节）。
 
-`probe` 是本仓库对 schema 的断言集：35 条，每条要么"必须被接受"、要么"必须被拒绝"，
+`probe` 是本仓库对 schema 的断言集：41 条，每条要么"必须被接受"、要么"必须被拒绝"，
 被接受的不该被接受的直接让脚本非零退出。它证明的是**数据库层**的不变量，和 Go 侧
 `pkg/apierr` + `services/*/store.go` 的内存断言一一对应。
 

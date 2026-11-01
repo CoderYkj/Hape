@@ -41,6 +41,14 @@ type Session struct {
 	CreatedAt    time.Time  `json:"created_at" doc:"RFC3339 creation time."`
 	ReadyAt      *time.Time `json:"ready_at,omitempty" doc:"When the dedicated server reported ready."`
 	FinishedAt   *time.Time `json:"finished_at,omitempty" doc:"When the accepted battle report landed."`
+
+	// ReleasePending records that the dedicated server could not be confirmed gone.
+	// The reconciler retries; nothing player-facing reads it, so it never reaches the
+	// wire (json:"-" keeps it out of the published contract too).
+	ReleasePending bool `json:"-" doc:"Internal: the server release is being retried."`
+	// ReleaseAttempts counts the failed attempts, so "still pending after 20 tries" is
+	// visible instead of looking identical to "just failed once".
+	ReleaseAttempts int `json:"-" doc:"Internal: failed release attempts."`
 }
 
 // PlayerResult is one player's authoritative outcome, reported by the server.
@@ -94,6 +102,15 @@ type Expirer interface {
 	ExpireStale(ctx context.Context, before time.Time) ([]Session, error)
 }
 
+// ReleaseTracker is the optional store capability the reconciler needs: find sessions
+// whose dedicated server was never confirmed gone.
+//
+// Separate from Store for the same reason Expirer is: a store that cannot scan simply
+// does not implement it, and the caller reports that instead of pretending it swept.
+type ReleaseTracker interface {
+	PendingReleases(ctx context.Context, limit int) ([]Session, error)
+}
+
 // Memory is the in-memory Store.
 type Memory struct {
 	mu      sync.Mutex
@@ -108,6 +125,10 @@ func NewMemory() *Memory {
 }
 
 func (m *Memory) Create(_ context.Context, session Session) (Session, error) {
+	// A brand new session has nothing to release yet; both stores agree on that, and
+	// the SQL store relies on the column defaults.
+	session.ReleasePending = false
+	session.ReleaseAttempts = 0
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, exists := m.byID[session.ID]; exists {
@@ -157,6 +178,25 @@ func (m *Memory) Update(_ context.Context, id string, mutate func(*Session) erro
 	}
 	m.byID[id] = session
 	return session, nil
+}
+
+// PendingReleases implements ReleaseTracker.
+func (m *Memory) PendingReleases(_ context.Context, limit int) ([]Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pending := []Session{}
+	for _, session := range m.byID {
+		if session.ReleasePending {
+			pending = append(pending, session)
+		}
+	}
+	// Oldest first, and deterministic: a sweep that reorders itself on every tick is
+	// impossible to diff in a log.
+	sort.Slice(pending, func(i, j int) bool { return pending[i].CreatedAt.Before(pending[j].CreatedAt) })
+	if limit > 0 && len(pending) > limit {
+		pending = pending[:limit]
+	}
+	return pending, nil
 }
 
 // ExpireStale fails every session still allocating or ready since before

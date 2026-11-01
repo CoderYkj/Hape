@@ -66,7 +66,10 @@ func (f *fakeEdgegap) handler() http.Handler {
 			}
 			w.WriteHeader(code)
 			if code < 300 {
-				reply := f.statusReplies[min(i, len(f.statusReplies)-1)]
+				reply := map[string]any{"request_id": "req-1", "current_status": "TERMINATED", "running": false}
+				if len(f.statusReplies) > 0 {
+					reply = f.statusReplies[min(i, len(f.statusReplies)-1)]
+				}
 				_ = json.NewEncoder(w).Encode(reply)
 			}
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/stop/"):
@@ -122,8 +125,11 @@ func newAdapter(t *testing.T, fake *fakeEdgegap, mutate func(*battlealloc.Edgega
 		BaseURL:      server.URL,
 		PollInterval: time.Millisecond,
 		ReadyTimeout: 2 * time.Second,
-		Latitude:     &lat,
-		Longitude:    &lon,
+		// Fast enough that "the provider never lets go" is a millisecond, not 30 seconds.
+		StopTimeout:      50 * time.Millisecond,
+		StopPollInterval: time.Millisecond,
+		Latitude:         &lat,
+		Longitude:        &lon,
 	}
 	if mutate != nil {
 		mutate(&cfg)
@@ -425,4 +431,88 @@ func containsCall(calls []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// TestEdgegapReleaseWaitsForTheProviderToAgree pins the read-back: a 200 on the stop
+// request means "accepted", and a release is only done when the status endpoint says the
+// deployment is not running.
+func TestEdgegapReleaseWaitsForTheProviderToAgree(t *testing.T) {
+	fake := &fakeEdgegap{statusReplies: []map[string]any{
+		{"request_id": "req-1", "current_status": "STOPPING", "running": true},
+		{"request_id": "req-1", "current_status": "STOPPING", "running": true},
+		{"request_id": "req-1", "current_status": "TERMINATED", "running": false},
+	}}
+	adapter := newAdapter(t, fake, nil)
+
+	if err := adapter.Release(context.Background(), "req-1"); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+
+	// It must have asked, then kept reading until the provider agreed.
+	calls := fake.recorded()
+	if !containsCall(calls, "DELETE /v1/stop/req-1") {
+		t.Fatalf("no stop request in %v", calls)
+	}
+	statusReads := 0
+	for _, call := range calls {
+		if call == "GET /v1/status/req-1" {
+			statusReads++
+		}
+	}
+	if statusReads != 3 {
+		t.Fatalf("status read %d times, want 3 (two running replies, then stopped): %v", statusReads, calls)
+	}
+}
+
+// TestEdgegapReleaseRetriesWhileTheProviderIsStuck is the billing case: the stop request
+// was accepted but the instance never goes away. That must surface as retryable, with the
+// last provider status in the error, so the reconciler records it and tries again.
+func TestEdgegapReleaseRetriesWhileTheProviderIsStuck(t *testing.T) {
+	fake := &fakeEdgegap{statusReplies: []map[string]any{
+		{"request_id": "req-1", "current_status": "READY", "running": true},
+	}}
+	adapter := newAdapter(t, fake, nil)
+
+	err := adapter.Release(context.Background(), "req-1")
+	if !errors.Is(err, battlealloc.ErrRetryable) {
+		t.Fatalf("err = %v, want ErrRetryable", err)
+	}
+	if !strings.Contains(err.Error(), "still running") || !strings.Contains(err.Error(), "READY") {
+		t.Fatalf("error must name the problem and the provider status: %v", err)
+	}
+}
+
+// TestEdgegapReleaseAcceptsAGoneDeployment: the provider may forget the deployment before
+// we finish reading it. That is success, not a 404 to escalate.
+func TestEdgegapReleaseAcceptsAGoneDeployment(t *testing.T) {
+	fake := &fakeEdgegap{statusCodes: []int{http.StatusNotFound}}
+	adapter := newAdapter(t, fake, nil)
+	if err := adapter.Release(context.Background(), "req-1"); err != nil {
+		t.Fatalf("a gone deployment is released: %v", err)
+	}
+}
+
+// TestEdgegapReleaseSurvivesATransientStatusRead keeps a blip from abandoning an instance
+// that is very likely still up (and still billing).
+func TestEdgegapReleaseSurvivesATransientStatusRead(t *testing.T) {
+	fake := &fakeEdgegap{
+		statusCodes: []int{http.StatusInternalServerError, http.StatusOK},
+		statusReplies: []map[string]any{
+			{"request_id": "req-1", "current_status": "TERMINATED", "running": false},
+		},
+	}
+	adapter := newAdapter(t, fake, nil)
+	if err := adapter.Release(context.Background(), "req-1"); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+}
+
+// TestEdgegapReleaseSurfacesAPermanentStatusError: a rejected token will not fix itself,
+// so waiting is pointless and the caller has to see it.
+func TestEdgegapReleaseSurfacesAPermanentStatusError(t *testing.T) {
+	fake := &fakeEdgegap{statusCodes: []int{http.StatusUnauthorized}}
+	adapter := newAdapter(t, fake, nil)
+	if err := adapter.Release(context.Background(), "req-1"); !errors.Is(err, battlealloc.ErrPermanent) {
+		t.Fatalf("err = %v, want ErrPermanent", err)
+	}
 }

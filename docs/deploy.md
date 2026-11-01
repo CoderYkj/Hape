@@ -289,6 +289,8 @@ BACKEND_SERVICE_CREDENTIALS="nakama=<old>,nakama-v2=<new>"
 | 版本不匹配会被拦住 | 本地实跑：桩 `pg_dump` 报 99 拒绝写盘；桩 `pg_restore` 报 99 拒绝执行且不碰库 |
 | 恢复需要确认 | `ops` job：不带 `RESTORE_CONFIRM` 断言失败 |
 | 生产 compose 缺密钥会失败 | `ops` job：无环境变量时 `config -q` 必须失败 |
+| 回收回读 | `pkg/battlealloc` 假厂商：停止后先 `running=true` 再 `false` → 成功；一直 running → 可重试并带状态；404/瞬时 500 → 成功；401 → 永久失败 |
+| 回收重试 | `services/session`：回收失败时战报仍 `applied=true` 且会话进 `release_pending`；allocator 恢复后 `RetryReleases` 清标记；持续失败时 attempts 递增 |
 | 凭证轮换 | `pkg/httpx` / `platform` 单测：重叠期两条都通过且各自身份正确、移除旧的后旧 401、重复 token 拒绝启动、（dev 与 prod 两条 auth 路径都覆盖） |
 | 生产 compose 结构合法 | `ops` job：`--env-file backend.env.example config -q` |
 | systemd 单元语法 | `ops` job：`systemd-analyze verify` |

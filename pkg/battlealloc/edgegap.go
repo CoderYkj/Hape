@@ -36,6 +36,8 @@ type Edgegap struct {
 	client    *http.Client
 	poll      time.Duration
 	readyWait time.Duration
+	stopWait  time.Duration
+	stopPoll  time.Duration
 	portName  string
 	portProto string
 	portNum   int
@@ -57,6 +59,12 @@ type EdgegapConfig struct {
 	// regularly take 20-90s to become ready, so a 10s timeout would be wrong.
 	PollInterval time.Duration
 	ReadyTimeout time.Duration
+	// StopTimeout bounds the read-back after a stop request. A 200 on DELETE only means
+	// the provider accepted the request; the instance may still be running and billing,
+	// so the release is not confirmed until the status endpoint agrees.
+	StopTimeout time.Duration
+	// StopPollInterval is how often the deployment status is re-read while waiting.
+	StopPollInterval time.Duration
 	// PortName/PortProto/PortNum identify the game port in the deployment. The
 	// Edgegap app registers it as name=gameport, 7777/UDP.
 	PortName  string
@@ -90,6 +98,14 @@ func NewEdgegap(cfg EdgegapConfig) (*Edgegap, error) {
 	if cfg.ReadyTimeout <= 0 {
 		cfg.ReadyTimeout = 3 * time.Minute
 	}
+	if cfg.StopTimeout <= 0 {
+		// Teardown is usually much faster than startup, but it is not instant and the
+		// cost of guessing too short is a false "still running" alarm.
+		cfg.StopTimeout = 30 * time.Second
+	}
+	if cfg.StopPollInterval <= 0 {
+		cfg.StopPollInterval = time.Second
+	}
 	if cfg.PortName == "" {
 		cfg.PortName = "gameport"
 	}
@@ -116,6 +132,8 @@ func NewEdgegap(cfg EdgegapConfig) (*Edgegap, error) {
 		client:    cfg.Client,
 		poll:      cfg.PollInterval,
 		readyWait: cfg.ReadyTimeout,
+		stopWait:  cfg.StopTimeout,
+		stopPoll:  cfg.StopPollInterval,
 		portName:  cfg.PortName,
 		portProto: strings.ToUpper(cfg.PortProto),
 		portNum:   cfg.PortNum,
@@ -142,7 +160,10 @@ func (e *Edgegap) Allocate(ctx context.Context, req Request) (Allocation, error)
 
 	deadline := e.now().Add(e.readyWait)
 	for {
-		status, err := e.status(ctx, requestID)
+		status, gone, err := e.status(ctx, requestID)
+		if gone {
+			return Allocation{}, fmt.Errorf("%w: edgegap deployment %s disappeared while starting", ErrPermanent, requestID)
+		}
 		if err != nil {
 			if errors.Is(err, ErrRetryable) {
 				// A transient status read must not abandon a live deployment.
@@ -158,7 +179,7 @@ func (e *Edgegap) Allocate(ctx context.Context, req Request) (Allocation, error)
 
 		if status.Error {
 			// The provider gave up: stop it (harmless if already gone) and report.
-			_ = e.Release(ctx, requestID)
+			_ = e.stop(ctx, requestID)
 			return Allocation{}, fmt.Errorf("%w: edgegap deployment failed: %s",
 				ErrPermanent, firstNonEmpty(status.ErrorDetail, status.CurrentStatus))
 		}
@@ -166,27 +187,41 @@ func (e *Edgegap) Allocate(ctx context.Context, req Request) (Allocation, error)
 		if status.Running {
 			allocation, err := e.allocationFrom(requestID, status)
 			if err != nil {
-				_ = e.Release(ctx, requestID)
+				_ = e.stop(ctx, requestID)
 				return Allocation{}, err
 			}
 			return allocation, nil
 		}
 
 		if !e.now().Before(deadline) {
-			_ = e.Release(ctx, requestID)
+			_ = e.stop(ctx, requestID)
 			return Allocation{}, fmt.Errorf("%w: edgegap deployment %s not ready after %s (status %q)",
 				ErrRetryable, requestID, e.readyWait, status.CurrentStatus)
 		}
 		if err := sleep(ctx, e.poll); err != nil {
-			_ = e.Release(ctx, requestID)
+			_ = e.stop(ctx, requestID)
 			return Allocation{}, err
 		}
 	}
 }
 
-// Release implements Allocator. Deleting an already-deleted deployment is a
-// success: release must be safe to retry.
+// Release implements Allocator.
+//
+// Stopping is two steps: ask, then read back until the provider agrees the instance is
+// gone. The stop request alone is not a release - a deployment that is still running is
+// still being billed, and "we sent a DELETE" is not something an operator can audit.
 func (e *Edgegap) Release(ctx context.Context, allocationID string) error {
+	if err := e.stop(ctx, allocationID); err != nil {
+		return err
+	}
+	return e.waitStopped(ctx, allocationID)
+}
+
+// stop issues the stop request without waiting for the read-back.
+//
+// Used where nothing could retry a confirmation (an allocation that failed before a
+// session ever recorded it), and by Release before it waits.
+func (e *Edgegap) stop(ctx context.Context, allocationID string) error {
 	if allocationID == "" {
 		return fmt.Errorf("%w: allocation id is required", ErrPermanent)
 	}
@@ -215,6 +250,44 @@ func (e *Edgegap) Release(ctx context.Context, allocationID string) error {
 		return fmt.Errorf("%w: edgegap stop: HTTP %d", ErrRetryable, resp.StatusCode)
 	default:
 		return fmt.Errorf("%w: edgegap stop: HTTP %d", ErrPermanent, resp.StatusCode)
+	}
+}
+
+// waitStopped is the read-back that turns "the provider accepted a stop request" into
+// "the instance is not running".
+//
+// It returns ErrRetryable when the budget runs out with the instance still up: the
+// caller records that and tries again, because an instance nobody confirmed stopped is
+// a recurring charge, not an eventual inconsistency.
+func (e *Edgegap) waitStopped(ctx context.Context, allocationID string) error {
+	deadline := e.now().Add(e.stopWait)
+	lastStatus := ""
+	for {
+		status, gone, err := e.status(ctx, allocationID)
+		if gone {
+			return nil
+		}
+		if err != nil {
+			if !errors.Is(err, ErrRetryable) {
+				// Credentials or a URL problem: waiting will not change the answer, and a
+				// permanent error is what the caller must surface.
+				return err
+			}
+			// A transient read must not abandon a deployment that is very likely still up.
+		} else {
+			if !status.Running {
+				return nil
+			}
+			lastStatus = status.CurrentStatus
+		}
+
+		if !e.now().Before(deadline) {
+			return fmt.Errorf("%w: edgegap deployment %s is still running %s after the stop request (status %q)",
+				ErrRetryable, allocationID, e.stopWait, lastStatus)
+		}
+		if err := sleep(ctx, e.stopPoll); err != nil {
+			return err
+		}
 	}
 }
 
@@ -307,31 +380,38 @@ type portMapping struct {
 	Name     string `json:"name"`
 }
 
-func (e *Edgegap) status(ctx context.Context, requestID string) (deploymentStatus, error) {
+// status reads one deployment. gone is true when the provider no longer knows the
+// deployment at all, which for a release is success and for an allocation is failure -
+// so it is reported as a fact rather than folded into an error.
+func (e *Edgegap) status(ctx context.Context, requestID string) (deploymentStatus, bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.baseURL+"/v1/status/"+requestID, nil)
 	if err != nil {
-		return deploymentStatus{}, fmt.Errorf("%w: build status request: %v", ErrPermanent, err)
+		return deploymentStatus{}, false, fmt.Errorf("%w: build status request: %v", ErrPermanent, err)
 	}
 	e.authorize(req)
 
 	resp, err := e.client.Do(req)
 	if err != nil {
-		return deploymentStatus{}, fmt.Errorf("%w: edgegap status: %v", ErrRetryable, err)
+		return deploymentStatus{}, false, fmt.Errorf("%w: edgegap status: %v", ErrRetryable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return deploymentStatus{}, fmt.Errorf("%w: read status response: %v", ErrRetryable, err)
+		return deploymentStatus{}, false, fmt.Errorf("%w: read status response: %v", ErrRetryable, err)
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		// The provider has forgotten the deployment: for a release that is the goal.
+		return deploymentStatus{}, true, nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return deploymentStatus{}, e.errorFor(resp.StatusCode, "status", payload)
+		return deploymentStatus{}, false, e.errorFor(resp.StatusCode, "status", payload)
 	}
 
 	var status deploymentStatus
 	if err := json.Unmarshal(payload, &status); err != nil {
-		return deploymentStatus{}, fmt.Errorf("%w: decode status response: %v", ErrPermanent, err)
+		return deploymentStatus{}, false, fmt.Errorf("%w: decode status response: %v", ErrPermanent, err)
 	}
-	return status, nil
+	return status, false, nil
 }
 
 // allocationFrom picks the game port and builds the address we hand to the client.

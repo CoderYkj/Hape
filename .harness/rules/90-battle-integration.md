@@ -131,7 +131,11 @@ type Allocator interface {
 
 1. `Allocate` 带超时（建议 10s）与可重试的错误分类（可重试：限流/5xx；不可重试：配置错误）。
 2. 拿不到机器时返回错误，不要返回零值 `Allocation`。
-3. `Release` 在"对局结束"与"清理超时会话"两条路径都要调到（v0 已接：`session.submitResult` 成功结算后、`session.ExpireStale` 里各一次，都是 best-effort）。
+3. `Release` 在"对局结束"与"清理超时会话"两条路径都要调到（已接：`session.submitResult` 成功结算后、`session.ExpireStale` 里各一次）。
+4. **回收 = 停止请求 + 回读确认**：厂商的 200 只表示"接受了请求"。`Release` 必须轮询
+   `/v1/status/{id}` 直到 `running == false`（或 404），超预算按可重试返回（spec 0015）。
+   确认失败会写成 `sessions.release_pending`，由 reconciler 每轮重试；`release_attempts`
+   持续增长就是漏计费的告警信号。回读失败**绝不能**让玩家的结算失败。
 4. 不把厂商 SDK 类型泄漏到 `services/*`；适配器内部爱怎么用怎么用。
 
 各厂商落点（供实现时参考，均未接入）：
@@ -149,7 +153,7 @@ type Allocator interface {
   v0 已实现单机版：`platform.RunReconciler` 定时调 `session.ExpireStale`，
   由 `BACKEND_RECONCILE_INTERVAL` 开启（默认关），`BACKEND_SESSION_STALE_AFTER` 定阈值（默认 5m）。
   `in_progress` 刻意不扫——没有单局时长上限时，杀一个正在打的对局比漏一个更糟。
-- **回收**：托管厂商按秒计费，空转的 DS 就是纯亏损。`Release` 必须在"对局结束 + TTL 到期"两条路径都调到。
+- **回收**：托管厂商按秒计费，空转的 DS 就是纯亏损。`Release` 必须在"对局结束 + TTL 到期"两条路径都调到，且必须回读确认（见 §4 第 4 条）。
 - **扇出必须原子**：数据库模式下，战报存档 + 进度 + 经济 + 排行 + 会话完成状态在
   同一个事务里提交（ADR 0007）。不要在这个事务里加"顺手调用外部服务"的代码——
   HTTP 或厂商 API 会把这个跨域事务拖成一台慢查询。
@@ -188,7 +192,7 @@ BACKEND_ALLOCATOR=gamelift go run ./cmd/platform
 | 项 | 现状 | 需要做什么 |
 |---|---|---|
 | DS ↔ 后端认证 | 双凭证：service token（进程）+ 每场 `X-Session-Token`（会话） | 凭证轮换 / mTLS；真机确认 Edgegap 注入生效 |
-| 会话回收 | 已接：结束 + 超时两条路径（best-effort） | 厂商侧确认回收成功（现在只记日志） |
+| 会话回收 | 已接：结束 + 超时两条路径；回收带状态回读，未确认的进 `release_pending` 并由 reconciler 重试（spec 0015） | 真实厂商的时序复验；`release_attempts` 增长接告警 |
 | 僵尸会话对账 | 已接：平台内定时器，opt-in | 多实例部署时的单活选主；`in_progress` 的时长上限 |
 | 玩家进入事件 | ready 直接可结算 | DS 上报 `in_progress` |
 | 掉线重连 | 未设计 | 需要 session 保存玩家连接状态 |

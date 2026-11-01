@@ -73,5 +73,7 @@
 
 - [x] 真机分配的一次成功验证 → **已完成**（`READY in 3s`，释放后 `TERMINATED`）
 - [ ] 玩家 IP 采集与透传（`Request.IPs` 已就绪，采集端未接）
-- [ ] 厂商侧回收回读确认 → **已延后**（触发：首次计费对账 / M2 收尾；见 README「已延后清单」）
+- [x] 厂商侧回收回读确认 → **已实现**（spec 0015）：`Release` 读回 `running == false`/404
+  才算成功，未确认的进 `sessions.release_pending` 由 reconciler 重试。真实的
+  `current_status` 时序仍需一次真实释放复验。
 - [ ] 是否在 CI 里跑 Edgegap 契约测试（现在跟着 `go test ./...` 跑，不花钱）

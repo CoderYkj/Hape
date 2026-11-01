@@ -401,13 +401,15 @@ func (s *Service) submitResult(r *http.Request) (any, error) {
 		return nil, err
 	}
 
-	// The match is over, so the dedicated server is no longer needed. Best
-	// effort: the report is already accepted, and a leaked allocation is a bill,
-	// not a correctness bug. Never fail the request over a release.
+	// The match is over, so the dedicated server is no longer needed. Never fail the
+	// request over a release: the report is already accepted. But a failed release is
+	// also not just a log line - a server nobody stopped keeps billing - so it is
+	// recorded and the reconciler retries it.
 	if updated.AllocationID != "" {
 		if err := s.alloc.Release(r.Context(), updated.AllocationID); err != nil {
-			s.log.WarnContext(r.Context(), "release after match failed", "session_id", sessionID,
-				"allocation_id", updated.AllocationID, "err", err)
+			s.log.WarnContext(r.Context(), "release after match failed; scheduling a retry",
+				"session_id", sessionID, "allocation_id", updated.AllocationID, "err", err)
+			s.markReleasePending(r.Context(), sessionID, err)
 		}
 	}
 
@@ -459,8 +461,9 @@ func (s *Service) ExpireStale(ctx context.Context, now time.Time, staleAfter tim
 	out := make([]StaleSession, 0, len(expired))
 	for _, stale := range expired {
 		if err := s.alloc.Release(ctx, stale.AllocationID); err != nil {
-			s.log.WarnContext(ctx, "release after expiry failed", "session_id", stale.ID,
-				"allocation_id", stale.AllocationID, "err", err)
+			s.log.WarnContext(ctx, "release after expiry failed; scheduling a retry",
+				"session_id", stale.ID, "allocation_id", stale.AllocationID, "err", err)
+			s.markReleasePending(ctx, stale.ID, err)
 		}
 		s.log.WarnContext(ctx, "session expired", "session_id", stale.ID, "match_id", stale.MatchID,
 			"provider", stale.Provider, "allocation_id", stale.AllocationID, "stale_state", StateFailed)
@@ -569,4 +572,65 @@ func validateResults(expected []string, results []PlayerResult) error {
 		}
 	}
 	return nil
+}
+
+// ErrNoReleaseTracker is returned when the active store cannot enumerate sessions with
+// a pending release, so the retry sweep is impossible in this deployment.
+var ErrNoReleaseTracker = errors.New("session store cannot enumerate pending releases")
+
+// markReleasePending records that a dedicated server was not confirmed gone.
+//
+// Recording is best effort and logged rather than returned: every caller is already
+// past the point where failing the request could help, and losing the retry record is
+// strictly better than losing the response.
+func (s *Service) markReleasePending(ctx context.Context, sessionID string, cause error) {
+	_, err := s.store.Update(ctx, sessionID, func(sp *Session) error {
+		sp.ReleasePending = true
+		sp.ReleaseAttempts++
+		return nil
+	})
+	if err != nil {
+		s.log.ErrorContext(ctx, "could not record a pending release",
+			"session_id", sessionID, "cause", cause.Error(), "err", err)
+	}
+}
+
+// RetryReleases re-attempts the releases no provider ever confirmed, and returns how
+// many it cleared. Safe to run from a timer: releasing an instance that is already gone
+// is a success, so a retry can never make things worse.
+//
+// This is the only place a billing leak is visible before the invoice: ReleaseAttempts
+// climbing on the same session means the provider is not letting go.
+func (s *Service) RetryReleases(ctx context.Context, limit int) (int, error) {
+	tracker, ok := s.store.(ReleaseTracker)
+	if !ok {
+		return 0, ErrNoReleaseTracker
+	}
+	pending, err := tracker.PendingReleases(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+
+	cleared := 0
+	for _, sp := range pending {
+		if err := s.alloc.Release(ctx, sp.AllocationID); err != nil {
+			s.log.WarnContext(ctx, "release retry failed",
+				"session_id", sp.ID, "allocation_id", sp.AllocationID,
+				"attempts", sp.ReleaseAttempts+1, "err", err)
+			s.markReleasePending(ctx, sp.ID, err)
+			continue
+		}
+		if _, err := s.store.Update(ctx, sp.ID, func(current *Session) error {
+			current.ReleasePending = false
+			return nil
+		}); err != nil {
+			s.log.ErrorContext(ctx, "release succeeded but the pending flag would not clear",
+				"session_id", sp.ID, "err", err)
+			continue
+		}
+		s.log.InfoContext(ctx, "pending release confirmed",
+			"session_id", sp.ID, "allocation_id", sp.AllocationID, "attempts", sp.ReleaseAttempts+1)
+		cleared++
+	}
+	return cleared, nil
 }
