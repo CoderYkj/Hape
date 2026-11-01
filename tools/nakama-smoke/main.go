@@ -17,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -67,10 +68,19 @@ func run() error {
 		} `json:"user"`
 	}
 	if err := json.Unmarshal(authRaw, &session); err != nil {
-		return fmt.Errorf("nakama device auth: decode: %w", err)
+		return fmt.Errorf("nakama device auth: decode: %w (keys: %v)", err, jsonKeys(authRaw))
 	}
-	if session.Token == "" || session.User.ID == "" {
-		return fmt.Errorf("nakama device auth: no session token / user id: %s", truncate(authRaw))
+	if session.Token == "" {
+		return fmt.Errorf("nakama device auth: no session token (keys: %v)", jsonKeys(authRaw))
+	}
+	// The user id is normally in the response body, but some server variants return
+	// only the session; the token itself always carries it.
+	if session.User.ID == "" {
+		session.User.ID = externalIDFromJWT(session.Token)
+	}
+	if session.User.ID == "" {
+		return fmt.Errorf("nakama device auth: no user id in the body or the token (keys: %v)",
+			jsonKeys(authRaw))
 	}
 	fmt.Printf("nakama session ok: user=%s token_len=%d\n", session.User.ID, len(session.Token))
 
@@ -136,6 +146,46 @@ func run() error {
 	fmt.Printf("PLAYER_ID=%s\n", login.Player.ID)
 	fmt.Println("OK: Nakama login → plugin RPC → backend account → backend read")
 	return nil
+}
+
+// jsonKeys lists the top-level keys of a JSON object, for error messages that do not
+// leak a session token (CI masks it in logs, which hides the rest of the body).
+func jsonKeys(raw []byte) []string {
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil
+	}
+	keys := make([]string, 0, len(obj))
+	for key := range obj {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// externalIDFromJWT reads the uid (or standard sub) claim without verifying the
+// signature: the token came from Nakama over a trusted connection, and this is only a
+// fallback for reading an id the body omitted.
+func externalIDFromJWT(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		UID string `json:"uid"`
+		Sub string `json:"sub"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return ""
+	}
+	if claims.UID != "" {
+		return claims.UID
+	}
+	return claims.Sub
 }
 
 func readAll(resp *http.Response) ([]byte, error) {
