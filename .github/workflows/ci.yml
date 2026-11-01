@@ -281,10 +281,23 @@ jobs:
           go run ./tools/nakama-smoke 2>&1 | tee /tmp/nakama-smoke.log
           status=$?
           if [ $status -ne 0 ]; then
-            echo "::error title=nakama smoke::$(tail -5 /tmp/nakama-smoke.log | tr '\n' ' ')"
+            echo "::error title=nakama smoke::$(grep -iE 'nakama-smoke:|rpc login|error' /tmp/nakama-smoke.log | head -3 | tr '\n' ' ' | cut -c1-400)"
             docker compose -f deploy/docker-compose.yml logs --no-color nakama | tail -40 || true
           fi
           exit $status
+
+      # The smoke probe's own output is the diagnosis; put it where it can be read.
+      - name: smoke diagnostics
+        if: always()
+        run: |
+          echo "=== smoke output ==="
+          cat /tmp/nakama-smoke.log 2>/dev/null || echo "no smoke output"
+          echo "=== module-side errors ==="
+          docker compose -f deploy/docker-compose.yml logs --no-color nakama 2>/dev/null | grep -i "login:" | tail -10 || true
+          echo "=== backend login lines ==="
+          docker compose -f deploy/docker-compose.yml logs --no-color backend 2>/dev/null | grep -i "account/sessions" | tail -5 || true
+          msg="$(grep -iE "nakama-smoke:|rpc login|no player|error" /tmp/nakama-smoke.log 2>/dev/null | head -3 | tr '\n' ' ' | cut -c1-400)"
+          echo "::error title=smoke failure::${msg:-no detail captured}"
 
       - name: the account is really in the backend database
         run: |
