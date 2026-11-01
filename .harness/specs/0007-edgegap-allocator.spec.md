@@ -71,7 +71,7 @@
 
 ## 7. 未决
 
-- [ ] 真机分配的一次成功验证（阻塞：账号里已有 1 个 active deployment，套餐上限 1）
+- [x] 真机分配的一次成功验证 → **已完成**（`READY in 3s`，释放后 `TERMINATED`）
 - [ ] 玩家 IP 采集与透传（`Request.IPs` 已就绪，采集端未接）
-- [ ] per-allocation token（DS 侧凭证）
+- [ ] 厂商侧回收回读确认 → **已延后**（触发：首次计费对账 / M2 收尾；见 README「已延后清单」）
 - [ ] 是否在 CI 里跑 Edgegap 契约测试（现在跟着 `go test ./...` 跑，不花钱）

@@ -76,5 +76,6 @@ DS 上报
 
 ## 7. 未决
 
-- [ ] 真机验证：Edgegap 冒烟时确认 DS 真的读到了 `RUNTIME_TOKEN`（阻塞于套餐并发额度）
+- [ ] 真机验证：确认 DS 真的读到了 `RUNTIME_TOKEN` → **已延后**（阻塞：需要自有 DS 镜像
+  打印环境变量；触发：第一版自有镜像就绪。见 README「已延后清单」）
 - [ ] 是否给 `session.create` 也加幂等键（现在靠 `sessions_one_per_match` 拦重复）
