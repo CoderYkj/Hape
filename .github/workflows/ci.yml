@@ -243,6 +243,7 @@ jobs:
             exit 1
           fi
           echo "server toolchain: $ver"
+          echo "::notice title=server toolchain::$ver"
           echo "TOOLCHAIN=$ver" >> "$GITHUB_ENV"
 
       # GOTOOLCHAIN must be exported in the shell, not set through the workflow `env`
@@ -322,8 +323,12 @@ jobs:
         run: |
           docker compose -f deploy/docker-compose.yml logs --no-color nakama > /tmp/nakama-diag.log || true
           if grep -qiE "different version of package|plugin was built with|plugin.Open" /tmp/nakama-diag.log; then
-            echo "Go plugin ABI mismatch: the .so must be built with the same Go toolchain and nakama-common version as the server"
-            grep -iE "different version of package|plugin was built with|plugin.Open" /tmp/nakama-diag.log | head -5
+            # Emit the offending line as an annotation: annotations are readable
+            # through the public check-runs API even when job logs are not, which
+            # makes the failure diagnosable without a human copying logs.
+            line="$(grep -iE "different version of package|plugin was built with|plugin.Open" /tmp/nakama-diag.log | head -1)"
+            echo "::error title=plugin ABI::$line"
+            echo "Go plugin ABI mismatch: $line"
             exit 1
           fi
           echo "no plugin ABI complaint in the log"
