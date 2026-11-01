@@ -26,9 +26,14 @@ released; nothing should be billing for this deployment
 （随后 GET /v1/status/799a98c234f1 → Status.TERMINATED，deployments 列表归零）
 ```
 
-仍**未确认**的一项：`RUNTIME_TOKEN` 是否真的出现在容器内环境。API 接受了
-`env_vars`（`is_hidden: true`），但样例镜像是 UE5 Lyra DS，不会把它打印出来；
-要确认得换成我们自己的 DS 镜像打一行日志。
+`RUNTIME_TOKEN` 的注入**机制**已经验证：`ds/`（自有参考 DS 镜像）启动第一行就打印
+`runtime_token=present(len=N)`，CI 的 `ds` job 在容器里跑完整一局并断言这一行，
+还断言缺了这个变量时容器**拒绝启动**（spec 0012）。
+
+仍未复验的是**Edgegap 这一侧**：`env_vars` 是否真的落进实例环境。做法很短：把发布的
+`:<sha>-ds` 镜像在 Edgegap 建一个 app version，分配一次，看 container logs 里那行 banner。
+触发条件：首次真实联调 / 第一次用我们自己的镜像分配。样例镜像（UE5 Lyra）不会打印，
+所以在那之前 Edgegap 侧仍然只验到"API 接受了 env_vars"。
 
 ## 0. 为什么是 Edgegap
 

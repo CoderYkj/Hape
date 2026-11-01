@@ -2,7 +2,7 @@
 GO ?= go
 export GOFLAGS ?= -buildvcs=false
 
-.PHONY: help verify test race fmt vet build contract run faked clean db-migrate db-probe
+.PHONY: help verify test race fmt vet build contract run faked ds ds-docker clean db-migrate db-probe
 
 help:
 	@echo "verify   gofmt + vet + build + test + contract drift"
@@ -12,6 +12,8 @@ help:
 	@echo "contract go run ./tools/apigen"
 	@echo "run      go run ./cmd/platform"
 	@echo "faked    go run ./tools/fakeds"
+	@echo "ds       build ds/ and run it as a provider-launched server (credentials in env)"
+	@echo "ds-docker  same, as a container (needs docker + a built hape-ds:ci image)"
 	@echo "db-migrate  apply db/migrations/*.sql with psql (needs PGHOST/PGDATABASE)"
 	@echo "db-probe    assert db/probes/*.probe.sql invariants"
 
@@ -41,6 +43,14 @@ run:
 
 faked:
 	$(GO) run ./tools/fakeds
+
+# The drill that proves the per-session credential reaches the instance: allocate a
+# session, then start ds/ with that credential in its environment (spec 0012).
+ds:
+	$(GO) run ./tools/fakeds -launch-ds exec
+
+ds-docker:
+	$(GO) run ./tools/fakeds -launch-ds docker -ds-image hape-ds:ci
 
 # Needs a reachable PostgreSQL: set PGHOST/PGPORT/PGUSER/PGDATABASE (psql reads them).
 # Windows: scripts/pg-local.ps1 -Action migrate|probe does the same on the local instance.

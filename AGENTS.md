@@ -39,6 +39,8 @@ Windows PowerShell 5.1），所以 Windows 上优先用 `scripts\*.cmd` 包装�
 |---|---|
 | 本地起全套 | `go run ./cmd/platform` → http://localhost:8080/healthz |
 | 模拟一场完整对局 | `go run ./tools/fakeds` |
+| 验证凭证注入战斗服 | `go run ./tools/fakeds -launch-ds exec`（或 `-launch-ds docker -ds-image hape-ds:ci`） |
+| 崩溃重启只结算一次 | `go run ./tools/fakeds -launch-ds exec -crash-restart` |
 | 单测 + e2e | `go test ./...` |
 | 竞态检查 | `go test -race ./...` |
 | 静态检查 | `go vet ./...` |
@@ -96,7 +98,8 @@ pkg/httpx/             路由、鉴权、限流位、指标、健康检查
 pkg/battlealloc/       战斗服分配抽象层（local + 三个 vendor 占位）
 pkg/config, pkg/logx/  环境变量配置、结构化日志
 tools/apigen/          契约 → OpenAPI 生成器（含 -check）
-tools/fakeds/          假 Dedicated Server，跑通整条对局链
+tools/fakeds/          假 Dedicated Server，跑通整条对局链（也可当"厂商"启动 ds/）
+ds/                    参考 Dedicated Server：环境契约 + 幂等结算（spec 0012）
 e2e/                   端到端闭环测试（HTTP 真实请求）
 api/openapi/*.json     生成产物，勿手改
 nakama/modules/        Nakama Go 插件（独立 go module，需联网构建）

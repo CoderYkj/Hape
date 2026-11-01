@@ -12,6 +12,10 @@ gofmt -l .
 gofmt -w .
 go run ./cmd/platform
 go run ./tools/fakeds
+go run ./tools/fakeds -launch-ds exec
+go run ./tools/fakeds -launch-ds docker -ds-image hape-ds:ci
+go run ./tools/fakeds -launch-ds exec -crash-restart
+docker build -f Dockerfile.ds -t hape-ds:ci .
 go run ./tools/apigen
 go run ./tools/apigen -check
 curl -s http://127.0.0.1:8080/healthz
@@ -69,6 +73,27 @@ go run ./tools/apigen -check
 推送 `main` 或开 PR 会跑 `.github/workflows/ci.yml`；它比本机多两件事：
 `-race`（需要 cgo，本机没有 C 编译器）和带 Postgres 的等价性测试。
 本机 `verify` 绿不代表 CI 绿，反之亦然——两边都跑才算数。
+
+## 战斗服（DS）相关
+
+`ds/` 是参考 Dedicated Server（spec 0012）。它读的是"厂商注入的环境"，
+所以单独跑它没有意义——环境得由 `fakeds` 注入：
+
+```bash
+go run ./cmd/platform                              # 终端 1
+go run ./tools/fakeds -launch-ds exec              # 终端 2：分配 + 启动 ds/ 二进制
+go run ./tools/fakeds -launch-ds exec -crash-restart   # 崩溃重启，只结算一次
+docker build -f Dockerfile.ds -t hape-ds:ci . && \
+  go run ./tools/fakeds -launch-ds docker -ds-image hape-ds:ci
+```
+
+判读要点：
+
+- 第一行 banner 必须有 `runtime_token=present(len=N)`，N 与后端发给它的令牌等长；
+  **banner 里不该出现 token 值**，出现就是泄漏。
+- `applied=true` 只出现一次；`-crash-restart` 的第一次跑退出码是 **17**（刻意崩溃），
+  第二次复用同一个 `result_id`。
+- 缺 `RUNTIME_TOKEN` 直接退出码 1 并点名该变量——这是设计，不是故障。
 
 ## 数据库相关
 

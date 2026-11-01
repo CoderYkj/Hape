@@ -1,0 +1,66 @@
+# syntax=docker/dockerfile:1
+#
+# The reference dedicated server image (ds/).
+#
+# This is deliberately not a UE5 build. It implements the runtime contract a UE5
+# dedicated server has to implement (docs/ue5-ds-integration.md, spec 0012), so the
+# match loop can be exercised - in a container, with the real per-session credential -
+# without an engine, a licence or a 40 GB build. When the UE5 server arrives it
+# replaces this binary behind the same environment contract.
+#
+#   docker build -f Dockerfile.ds -t hape-ds:local .
+#   docker run --rm --network host -p 7777:7777/udp \
+#     -e BACKEND_BASE_URL=http://127.0.0.1:8080 \
+#     -e BACKEND_SERVICE_TOKEN=... \
+#     -e BATTLE_SESSION_ID=s_... \
+#     -e RUNTIME_TOKEN=... \
+#     -e PLAYERS='["p_1","p_2"]' \
+#     hape-ds:local
+
+# ---------------------------------------------------------------------------
+# build
+# ---------------------------------------------------------------------------
+ARG GO_IMAGE=golang:1.23-alpine
+FROM ${GO_IMAGE} AS build
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# Same flags as the backend image: no cgo, no VCS stamp (there is no .git in the
+# build context), no local paths in the binary.
+RUN CGO_ENABLED=0 GOOS=linux go build -buildvcs=false -trimpath \
+      -ldflags="-s -w" \
+      -o /out/ds ./ds
+
+# ---------------------------------------------------------------------------
+# runtime
+# ---------------------------------------------------------------------------
+FROM alpine:3.20 AS runtime
+
+# Non-root, like the backend: a game server holds no privileged capability, and the
+# only two things it needs are the network and its results directory.
+RUN apk add --no-cache ca-certificates tzdata \
+ && adduser -D -H -u 10001 -s /sbin/nologin ds \
+ && mkdir -p /data/Saved/Results \
+ && chown -R 10001:10001 /data
+
+COPY --from=build /out/ds /usr/local/bin/ds
+
+USER 10001:10001
+WORKDIR /data
+
+EXPOSE 7777/udp
+
+# Only the values that have a safe default. Everything else (the session, the runtime
+# token, the players, the advertised address) is injected per instance by the provider
+# - a default there would be a security hole, not a convenience.
+ENV DS_PORT=7777 \
+    RESULTS_DIR=/data/Saved/Results
+
+# No HEALTHCHECK on purpose: this process serves exactly one match and then exits.
+# A health check could only restate "the container is running", and an orchestrator
+# acting on it might restart a server in the middle of a match.
+ENTRYPOINT ["/usr/local/bin/ds"]

@@ -440,6 +440,75 @@ jobs:
       - name: the systemd unit is syntactically valid
         run: systemd-analyze verify deploy/systemd/gamebackend.service
 
+  # The dedicated server image, and the runtime contract it implements. This is the
+  # only place the per-session credential is proven to arrive *inside an instance*:
+  # the backend mints it, the provider passes it as container environment, and the
+  # server reports back using it. spec 0012.
+  ds:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: build the dedicated server image
+        run: docker build -f Dockerfile.ds -t hape-ds:ci .
+
+      - name: the image runs unprivileged
+        run: test "$(docker run --rm --entrypoint id hape-ds:ci -u)" = "10001"
+
+      # A container that starts without the per-session token would happily serve a
+      # match it cannot report: players play, nothing settles, and the failure is
+      # silent. It must refuse to start instead, and say which variable is missing.
+      - name: an instance without the runtime token refuses to start
+        run: |
+          set +e
+          output="$(docker run --rm --network host \
+            -e BACKEND_BASE_URL=http://127.0.0.1:8080 \
+            -e BACKEND_SERVICE_TOKEN=dev-service \
+            -e BATTLE_SESSION_ID=s_ci \
+            -e PLAYERS='["p_1","p_2"]' \
+            hape-ds:ci 2>&1)"
+          status=$?
+          set -e
+          echo "$output"
+          if [ "$status" -eq 0 ]; then
+            echo "::error title=ds runtime contract::started without RUNTIME_TOKEN"
+            exit 1
+          fi
+          echo "$output" | grep -q 'RUNTIME_TOKEN'
+
+      - name: start the backend
+        run: |
+          go build -o /tmp/platform ./cmd/platform
+          nohup env BACKEND_ADDR=127.0.0.1:8080 /tmp/platform > /tmp/platform.log 2>&1 &
+          ok=no
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8080/healthz; then ok=yes; break; fi
+            sleep 1
+          done
+          if [ "$ok" != yes ]; then
+            echo "::error title=ds job::the backend never became healthy"
+            tail -50 /tmp/platform.log
+            exit 1
+          fi
+
+      - name: a containerized dedicated server settles a match
+        run: go run ./tools/fakeds -launch-ds docker -ds-image hape-ds:ci
+
+      - name: the same match with the server as a plain process
+        run: go run ./tools/fakeds -launch-ds exec
+
+      - name: a crashed instance restarts and still settles once
+        run: go run ./tools/fakeds -launch-ds docker -ds-image hape-ds:ci -crash-restart
+
+      - name: backend log
+        if: always()
+        run: tail -60 /tmp/platform.log
+
   # Publishing the artifact. What runs in production has to be the thing CI built and
   # pushed, so the tag is the commit sha and the job pulls it back to prove it is
   # servable.
@@ -484,3 +553,15 @@ jobs:
             exit 1
           fi
           echo "::notice title=released image::$IMAGE"
+
+      # The dedicated server ships from the same commit as the backend it reports to,
+      # under a `-ds` suffix: one repository, two runtimes, no version skew by accident.
+      - name: build and push the dedicated server image
+        run: |
+          ds_image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA:0:12}-ds"
+          docker build -f Dockerfile.ds -t "$ds_image" .
+          docker push "$ds_image" || {
+            echo "::error title=registry push::could not push $ds_image"
+            exit 1
+          }
+          echo "::notice title=released dedicated server::$ds_image"

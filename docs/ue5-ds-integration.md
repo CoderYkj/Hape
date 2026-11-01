@@ -8,7 +8,8 @@
 | # | 时机 | 动作 | 后端接口 |
 |---|---|---|---|
 | 1 | `Listen` 成功之后 | 上报地址端口 | `POST /v1/session/sessions/{id}/ready` |
-| 2 | 对局正常结束 | 上报权威战报 | `POST /v1/session/sessions/{id}/results` |
+| 2 | 每局开始 | 生成并**持久化** `result_id` | （无，本地落盘） |
+| 3 | 对局正常结束 | 上报权威战报 | `POST /v1/session/sessions/{id}/results` |
 
 两个上报都要带**双凭证**：
 
@@ -20,9 +21,12 @@ X-Session-Token: <RUNTIME_TOKEN>                 # 这一场的身份
 `RUNTIME_TOKEN` 由后端分配时生成，通过托管厂商的实例环境变量注入（Edgegap 走
 `env_vars`，`is_hidden: true`）。DS 把它读进内存、每个上报请求都带上即可，不要写日志。
 缺它或者拿别场的 token → `401 unauthenticated`（见 spec 0008）。
-| 3 | 每局开始 | 生成并**持久化** `result_id` | （无，本地落盘） |
 
-第 3 条最容易被忽略：`result_id` 必须是"这一局的结果标识"，DS 崩溃重启后仍能拿回同一个值，
+**可执行版本**：`ds/` 里就是这个契约的参考实现（Go，不是 UE5），
+`ds/README.md` 写了环境变量表与本地跑法，spec 0012 写了为什么这么定。
+UE5 真机替换的是那个二进制，接口与变量名不变。
+
+第 2 条最容易被忽略：`result_id` 必须是"这一局的结果标识"，DS 崩溃重启后仍能拿回同一个值，
 否则重试就会变成"两次结算"。建议：`<session_id>-<开始时间戳 utc>-<随机短码>`，写进
 `Saved/Results/<session_id>.json`，上报成功后标记完成。
 
@@ -35,6 +39,9 @@ BACKEND_BASE_URL     https://api.example.com   （或内网地址）
 BACKEND_SERVICE_TOKEN <由 secret 注入，不写进镜像>
 BATTLE_SESSION_ID    <从 vendor 的启动参数解析，或 DS 主动查询>
 ```
+
+完整的环境契约（哪些必需、默认值、失败行为）见 spec 0012 §3 与 `ds/README.md`；
+`PLAYERS` 是参考实现的权宜——真实 UE5 DS 从玩家 join 事件拿名单，env 只给会话身份。
 
 `BATTLE_SESSION_ID` 的来源取决于托管厂商：
 
@@ -138,11 +145,16 @@ session。这个读接口目前**没有实现**，也不属于任何里程碑—
 ## 6. 没有 UE5 时怎么联调
 
 ```bash
-go run ./cmd/platform     # 终端 1
-go run ./tools/fakeds     # 终端 2：模拟一台 DS 跑完整一局
+go run ./cmd/platform                       # 终端 1
+go run ./tools/fakeds                       # 终端 2：本进程直接扮演 DS
+go run ./tools/fakeds -launch-ds exec       # 扮演"厂商"：启动 ds/ 二进制并注入环境
+go run ./tools/fakeds -launch-ds docker -ds-image hape-ds:ci   # 容器形态
+go run ./tools/fakeds -launch-ds exec -crash-restart           # 崩溃重启，只结算一次
 ```
 
-`tools/fakeds` 就是本文档的可执行版本：它做的正好是第 1、2、4 节描述的动作。
+`tools/fakeds` 默认角色就是本文档的可执行版本（第 1、2、4 节的动作全做一遍）。
+`-launch-ds` 把"厂商"与"战斗服"分开：先分配，再把环境注入一个**独立进程/容器**，
+由它自己上报。这条路径才是"凭证真的到了实例里"的证明。
 
 ## 7. 排障
 
