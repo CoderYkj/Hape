@@ -169,7 +169,7 @@
 <table>
 <thead><tr><th>编号</th><th>环节</th><th>主要功能（做什么 / 不做什么）</th><th>状态</th><th>代码与规格</th></tr></thead>
 <tbody>
-<tr><td>①</td><td>Nakama 登录</td><td>Nakama 是<strong>身份的唯一来源</strong>：设备/第三方账号登录、发 session token。它不决定游戏内经济、不分配战斗服。</td><td><span class="badge ok">✅</span></td><td><code>nakama/runtime/login.lua</code> · spec 0009</td></tr>
+<tr><td>①</td><td>Nakama 登录</td><td>Nakama 是<strong>身份的唯一来源</strong>：设备/第三方账号登录、发 session token。它不决定游戏内经济、不分配战斗服。</td><td><span class="badge ok">✅</span></td><td><code>nakama/modules</code>（Go 插件）· ADR 0011</td></tr>
 <tr><td>②</td><td>RPC 桥接</td><td>Nakama 用<strong>服务凭证</strong>调后端 <code>account.login</code>，把外部身份换成后端 <code>player_id</code> + 后端 token。客户端拿不到服务凭证，也不能自报身份。</td><td><span class="badge ok">✅</span></td><td><code>services/account</code> · ADR 0010 / spec 0011</td></tr>
 <tr><td>③</td><td>业务 HTTP</td><td>后端 token 之上的一切：读档案、排队、轮询票据、按 match 找服务器、读结算。入口按 op 声明鉴权级别（玩家 / 服务），越权与越 scope 都拒绝。</td><td><span class="badge ok">✅</span></td><td><code>pkg/httpx</code> · spec 0016</td></tr>
 <tr><td>④</td><td>匹配与分配</td><td>matchmaking 按队列与 MMR 组局；session 服务调 <strong>Allocator</strong> 申请实例，把 <code>RUNTIME_TOKEN</code> 与参战名单注入容器。分配失败会落 <code>failed</code>，不留僵尸会话。</td><td><span class="badge ok">✅</span>（Edgegap 真机）</td><td><code>pkg/battlealloc</code> · spec 0007/0013</td></tr>
@@ -337,7 +337,7 @@
 <tr><td><code>verify</code></td><td>gofmt / vet / build / <code>go test -race</code>（含真库等价性）/ schema 断言 / 契约漂移</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td><code>image</code></td><td>后端镜像构建、非 root、探活、/metrics 可用</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td><code>compose</code></td><td>postgres + backend 起栈、迁移、48 条断言、断言一次登录真的落库</td><td><span class="badge ok">✅</span></td></tr>
-<tr><td><code>nakama-module</code></td><td>Lua 模块在真实 Nakama 里注册成功</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><code>nakama-module</code></td><td>Go 插件的快速编译检查（真构建在 <code>nakama</code> job 的镜像里）</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td><code>nakama</code></td><td>设备登录 → RPC → 后端读取；以及客户端用 Nakama 身份打完整一局</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td><code>ops</code></td><td>迁移幂等 / append-only、备份恢复到新库、pg 客户端版本护栏</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td><code>ds</code></td><td>DS 镜像、缺 token 拒绝启动、容器/进程各打一局、崩溃重启只结算一次、dev 身份完整对局</td><td><span class="badge ok">✅</span></td></tr>

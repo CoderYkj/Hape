@@ -28,7 +28,7 @@ graph TB
   end
 
   subgraph HOST["单机主机（生产目标）"]
-    NK["Nakama<br/>✅ 真容器登录链路 · spec 0009"]
+    NK["Nakama + Go 插件<br/>✅ 真容器登录链路 · ADR 0011"]
     BE["backend：platform 单进程<br/>✅ 7 域 · 22 op · spec 0001/0002"]
     PG[("PostgreSQL 16<br/>✅ 4 迁移 · 48 条断言 · spec 0006")]
     SM["Prometheus<br/>🟡 规则文件已写，未接入真实实例"]

@@ -8,16 +8,22 @@
 //
 //	client --(Nakama session)--> Nakama --(this RPC)--> backend POST /v1/account/sessions
 //
-// Build (requires network access to fetch nakama-common):
+// Build: do NOT build the .so on your machine and copy it in. A Go plugin shares the hosting
+// binary's type information, so plugin.Open compares package hashes; a .so built with another
+// toolchain or without `--trimpath` fails with "plugin was built with a different version of
+// package internal/goarch" and Nakama refuses to start (ADR 0011 records that failure).
 //
-//	go mod tidy
-//	go build -buildmode=plugin -o build/gamemodule.so .
+// Instead, `nakama/Dockerfile` builds it inside the official
+// heroiclabs/nakama-pluginbuilder:<same tag as the runtime> image with --trimpath, and copies
+// the result into the runtime image. That is the only build whose artifact can load:
 //
-// Then copy the .so into Nakama's data/modules directory and restart Nakama.
+//	docker compose -f deploy/docker-compose.yml up -d --build nakama
 //
-// NOT covered by `scripts/verify.ps1`: this file is a separate Go module whose
-// dependency graph needs network access, so it is excluded from the root
-// module build on purpose.
+// CI proves the whole path: the `nakama` job loads the plugin, calls this RPC and checks the
+// backend row. `go test ./...` here covers the HTTP client without needing Nakama.
+//
+// NOT part of the root Go module: this is a separate module (its own go.mod) whose dependency
+// graph needs network access, so `scripts/verify.ps1` does not build it.
 package main
 
 import (
