@@ -61,6 +61,7 @@ make verify                       # Linux / CI
 
 | 角色 | 入口 |
 |---|---|
+| **不知道读哪份** | `docs/README.md`：文档索引（每份文档回答什么问题、哪份是活文档、哪份是历史记录） |
 | **先看整体** | `docs/architecture-map.html`（浏览器打开）：现在长什么样，每个环节做什么，**逐项标注 ✅已验证 / 🟡已实现未验证 / ⬜未实现**；Markdown 源 `docs/architecture-map.md` |
 | **看还剩什么** | `docs/roadmap.html`：三条并行主线、现在就能做的三项（含判据）、里程碑 M2–M5、未实现清单、已关闭清单；Markdown 源 `docs/roadmap.md` |
 | AI Agent | `AGENTS.md` -> `.harness/rules/00-global.md` -> 其余规则按编号 |

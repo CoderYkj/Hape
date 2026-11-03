@@ -1,5 +1,10 @@
 # UE5 Dedicated Server 接入指南
 
+> 读者：实现战斗服的人 · 状态：活文档（实现指南）· 最后更新：2026-11-03 · 上游 spec 0012
+>
+> **角色分工**：要签的约定在 `docs/ds-runtime-contract.md`；本文讲**怎么实现**它
+> （C++ 形状、厂商差异、排障）。两者冲突时以契约为准。
+
 > 本文里的 C++ 片段是**示例**，没有在 UE5 工程里编译验证。命令与 HTTP 契约是经过验证的
 > （`e2e/flow_test.go` 与 `tools/fakeds` 实际跑通）。
 
@@ -32,16 +37,9 @@ UE5 真机替换的是那个二进制，接口与变量名不变。
 
 ## 2. DS 需要的环境/启动参数
 
-托管厂商会注入端口与地图等；后端只需要知道三件事：
-
-```text
-BACKEND_BASE_URL     https://api.example.com   （或内网地址）
-BACKEND_SERVICE_TOKEN <由 secret 注入，不写进镜像>
-BATTLE_SESSION_ID    <从 vendor 的启动参数解析，或 DS 主动查询>
-```
-
-完整的环境契约（哪些必需、默认值、失败行为）见 spec 0012 §3 与 `ds/README.md`；
-`PLAYERS` 是参考实现的权宜——真实 UE5 DS 从玩家 join 事件拿名单，env 只给会话身份。
+**完整清单不在这里**：变量名、必填性、默认值、失败行为都以
+`docs/ds-runtime-contract.md` §1 为准（那是引擎组要签署的契约）。本节只补充
+**实现层面的来源差异**。
 
 `BATTLE_SESSION_ID` 的来源取决于托管厂商：
 
@@ -111,16 +109,8 @@ void UDsBackendClient::ReportResult(const FString& SessionId, const TArray<FPlay
 }
 ```
 
-重试语义（与后端契约对齐）：
-
-| 响应 | 含义 | DS 该做什么 |
-|---|---|---|
-| 200 `applied=true` | 首次结算成功 | 标记本地 result 已完成 |
-| 200 `applied=false` | 已结算过（重试重复） | 标记完成，停止重试 |
-| 409 | 该 session 已有**另一份**结果 | 停止重试，告警（说明 DS 逻辑有问题） |
-| 400 | 字段不合法（players 与 session 不一致等） | 停止重试，告警，别丢日志 |
-| 412 | 状态不允许（session 还在 allocating） | 先 `GET` 确认状态，短暂退避后重试 |
-| 503 | 下游扇出失败 | **用同一个 result_id** 重试（幂等安全） |
+重试语义（每种响应该做什么）见 `docs/ds-runtime-contract.md` §4，那是唯一权威版本；
+本节不再复述，避免两份表各自漂移。
 
 `players` 必须与后端 session 的 `players` 完全一致：用后端返回的 `player_id`，
 不是 Nakama user id，也不是客户端传入的任何 id。

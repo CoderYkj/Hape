@@ -22,7 +22,7 @@ groups:
             The retry loop has failed to confirm the stop. Check
             backend_release_max_attempts for how many attempts, and grep the backend log for
             "release retry failed" to get the allocation id.
-          runbook: "docs/deploy.md#118-回收回读的指标与告警"
+          runbook: "docs/observability.md#1-回收回读的指标与告警"
 
       # spec 0018: release_pending only covers "we tried and failed". This one also covers
       # "we never got as far as confirming it" (a crash between allocating and recording, a
@@ -38,7 +38,7 @@ groups:
             An allocation was made and the provider never confirmed it stopped. Run
             `go run ./tools/allocation-report -unreleased` on the host to see which sessions
             and how long they have been outstanding.
-          runbook: "docs/deploy.md#119-分配台账对账用"
+          runbook: "docs/observability.md#2-分配台账对账用"
 
       # The provider is not answering. 3 minutes is the allocator's own ready timeout: past
       # it, the allocation has already been abandoned inside the process.

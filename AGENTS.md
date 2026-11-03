@@ -107,7 +107,7 @@ nakama/modules/        Nakama Go 插件（独立 go module，需联网构建）
 db/migrations/         目标 SQL schema（v0 未启用）
 deploy/                本地 docker-compose：postgres + backend + nakama（未验证）
 Dockerfile             多阶段构建 + 非 root 运行时（未验证，见 docs/deploy.md）
-docs/                  架构 / 接口契约 / UE5 对接 / 本地运行手册
+docs/                  文档索引见 docs/README.md；架构与验证状态 / 路线图 / 部署 / 观测 / SLO / DS 契约
 scripts/               verify.ps1 + verify.sh（唯一的全量校验入口）
 Makefile               Linux / CI 的等价入口
 README.md              人类入口：这是什么、怎么跑、哪些还没验证

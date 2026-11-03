@@ -1,19 +1,26 @@
 # 部署手册
 
-> **本文件描述的镜像与编排从未被真正构建过**：写它的时候机器上没有 Docker
-> （`docker version` 直接失败）。命令按文档意图写，但"能跑"这件事没有证据。
-> 第一次真机构建时，先读第 9 节「已知坑」。
+> 读者：要把它部署到一台机器上的人 · 状态：活文档（2026-11-03） · 上游：ADR 0006 / spec 0006 / 0016 / 0019
+>
+> 镜像与编排**由 CI 构建、推送并回拉探活**（`image` / `release` job），迁移与备份恢复也在
+> `ops` / `compose` job 里跑过。**真正没有验证的是"在一台真机上部署"**：systemd 启停、
+> TLS 反代、磁盘水位、跨机恢复。第 10 节列的就是这部分。
+>
+> 上线之后的观测与运维在 `docs/observability.md`；SLO 目标在 `docs/slo.md`。
 
 ## 1. 现状
 
-| 东西 | 有 | 说明 |
+| 东西 | 有 | 状态 |
 |---|---|---|
-| `Dockerfile` | 有 | 多阶段构建，alpine 运行时 + 非 root（uid 10001），静态二进制 |
+| `Dockerfile` | 有 | 多阶段 + alpine + 非 root；CI 的 `image` job 构建、以 uid 10001 运行、探活并读 `/metrics` |
+| `Dockerfile.ds` | 有 | 参考 DS 镜像；CI 的 `ds` job 在容器里真打一局，并断言缺 `RUNTIME_TOKEN` 时**拒绝启动** |
 | `.dockerignore` | 有 | 构建上下文只留 Go 源码，不含 `.git`（因此 build 带 `-buildvcs=false`） |
-| `deploy/docker-compose.yml` | 有 | postgres + backend + nakama 三个服务 |
-| 镜像仓库 | **没有** | 没有 registry，也没有 `docker push` 的目标 |
-| CI 构建镜像 | **没有** | CI 只跑 `verify`，不构建镜像（见第 10 节） |
-| 生产认证器 | **没有** | 只有 `DevAuth`；`BACKEND_DEV_AUTH=false` 时平台**拒绝启动**，这是有意的 |
+| `deploy/docker-compose.yml` | 有 | dev：postgres + backend + nakama |
+| `deploy/docker-compose.prod.yml` | 有 | 单机生产形态：postgres + backend（+ 可选 `observability` profile 的 prometheus）；`ops` job 校验它缺密钥时**必须失败** |
+| `deploy/systemd/gamebackend.service` | 有 | 单机 systemd 单元；`ops` job 跑 `systemd-analyze verify` |
+| 镜像仓库 | 有 | `ghcr.io/<owner>/hape:<sha>` 与 `:<sha>-ds`，由 `release` job 推送后**回拉探活** |
+| 生产认证器 | 有 | `pkg/httpx/jwtauth.go`：Nakama JWT 校验 + 后端签发玩家 token（ADR 0010） |
+| 真实主机部署 | **没有** | 见第 10 节：systemd 启停、TLS 反代、磁盘水位、跨机恢复都未在真机验证 |
 
 ## 2. 构建镜像
 
@@ -170,22 +177,27 @@ M0 没有可部署目标，所以这一步是模板，不是已验证的流水�
 
 ## 10. 未验证清单与待补
 
-未验证（有文件、没跑过）：
+未验证（有文件、**没在真机上跑过**）：
 
-- `Dockerfile`、`.dockerignore`、`deploy/docker-compose.yml`（含新增的 `backend` 服务）
-- 迁移的**部署**路径：`0001_init.sql` 已在本地 Postgres 16.4 上执行并验证（见
-  `docs/postgres-local.md`），但"部署时由谁执行迁移"仍未接（第 7 节第 1 步）
-- Nakama 镜像 tag `3.22.0` 与那串启动参数
-- `nakama/modules` 插件能否真正编译进镜像（`go build -buildmode=plugin`，本机无网络拉 `nakama-common`）
+- systemd 启停、TLS 反代、磁盘水位、跨机恢复
+- 真实主机上的 compose / systemd 组合（CI 只校验 `config` 与 unit 语法）
+- 生产数据库运维：备份策略、复制、连接池调优、密码策略（脚本存在，真机未跑）
+- Nakama 在真机上的部署形态（CI 用 compose 跑通登录链路，但不是生产拓扑）
+
+已在 CI 验证过、不再列为待补的：
+
+- 镜像构建 / 非 root / 探活 / `/metrics`（`image`）、推送与回拉（`release`）
+- 迁移幂等与 append-only 校验、备份恢复演练（恢复到新库）、pg 客户端版本护栏（`ops`）
+- 生产 compose 缺密钥必失败、示例 env 可解析（`ops`）
+- 48 条 schema 断言与一次登录真实落库（`verify` / `compose`）
+- DS 镜像在容器里完成一局、崩溃重启只结算一次（`ds`）
 
 待补（按优先级）：
 
-1. registry + CI 里的镜像构建与推送任务（`.github/workflows/ci.yml` 目前只镜像 `verify.sh` 的步骤，故意保持一一对应）
-2. 生产 `Authenticator`（Nakama JWT 校验），有了它 `prod` 才可能真的启动
-3. `db/migrations/0001_init.sql` 的**生产执行路径**（本机已验证可执行；生产需要
-   runner 或部署步骤，且要与 SQL store 同批上线）
-4. compose 里后端的数据库接线（建库 init 脚本 + `BACKEND_DATABASE_URL`），见第 4 节注意
-5. Kubernetes / 单机 systemd 的清单：现在只有 compose，没有生产编排
+1. **在真实主机上部署一次**（roadmap 第 1 项）：systemd + TLS 反代 + 备份恢复演练 + 磁盘水位
+2. **厂商账单逐行比对**（observability.md 第 2 节的台账已就绪，缺账单数据）
+3. 生产数据库运维（复制/连接池/密码策略）
+4. 多副本部署时 reconciler 的单活选主（触发条件：多副本）
 ## 11. 生产目标（单机 compose + systemd）
 
 小团队的上线形态是**一台机器 + compose + systemd**；k8s 清单不在本轮范围。
@@ -348,119 +360,7 @@ BACKEND_SERVICE_SCOPE_ENFORCE=true
 **没有 CI 覆盖的部分**：真正的目标主机（systemd 启停、TLS 反代、磁盘与内存水位）、
 镜像仓库的保留策略、跨机器恢复。这些需要一台真机器，见 README 的"未验证"清单。
 
-### 11.8 回收回读的指标与告警
+### 11.8 观测与运维（已独立成篇）
 
-回收失败不是可见的 5xx：它是一条待重试记录（`sessions.release_pending`）。所以它必须
-变成数字，否则"服务器没停、还在计费"只会在账单上出现。
-
-`/metrics` 新增（spec 0015）：
-
-| 指标 | 类型 | 含义 |
-|---|---|---|
-| `backend_release_pending_sessions` | gauge | 当前有多少场会话的回收尚未被确认（健康时恒为 0） |
-| `backend_release_max_attempts` | gauge | 待回收里最严重那场的重试次数（持续增长 = 厂商不放） |
-| `backend_release_oldest_pending_seconds` | gauge | 最老的待回收等了多久（从会话结束算，没结束的从创建算，是上界） |
-| `backend_release_failed_total` | counter | 累计失败的回收重试次数 |
-| `backend_release_confirmed_total` | counter | 累计成功的回收重试次数 |
-
-指标由 reconciler 每一轮发布（`Platform.ReconcileOnce`），所以**必须开启**
-`BACKEND_RECONCILE_INTERVAL`（生产 compose 默认 30s）。没开时这些序列不存在，告警不会
-误报，但也永远不会响——这本身是要在部署检查单里确认的一项。
-
-告警规则在 `deploy/prometheus/hape.rules.yml`（一条）：
-
-```yaml
-- alert: DedicatedServerReleaseStuck
-  expr: backend_release_pending_sessions > 0
-  for: 15m
-```
-
-为什么 15 分钟：厂商通常几秒到几十秒完成销毁，30 次重试仍不消失基本不是"慢"，而是
-"卡住"了。告警后按顺序处理：
-
-1. `backend_release_max_attempts` — 多少次了；
-2. 后端日志 grep `release retry failed`，拿 `allocation_id`；
-3. 去厂商控制台查这个 deployment 的真实状态；必要时手工 `DELETE /v1/stop/{id}`；
-4. 若厂商侧已终止而本地仍 pending，先看 `current_status` 的具体取值。实测（2026-11-01）
-   真实取值带 `Status.` 前缀：`Status.READY -> Status.TERMINATING`，且 `running` 在状态
-   仍是 `TERMINATING` 时就变 false——判定必须看 `running`，等字符串 `TERMINATED` 会多一个
-   超时竞态。
-
-验证方式（不需要真的厂商）：单测 `TestReconcileOncePublishesTheReleaseBacklog` 用一个
-"永远不释放"的假分配器跑完整链路——战报仍 200、会话进 pending、gauge 变 1、恢复后 gauge
-回 0 且 `confirmed_total` +1。
-
-### 11.9 分配台账（对账用）
-
-每次分配都会在会话上留下两个时间点：`allocated_at`（拿到实例）与 `released_at`（厂商**回读确认**
-实例已停止）。由此可以回答两个运营问题，而不必等厂商账单：
-
-- **哪些实例可能还在计费**：有 `allocated_at`、没有 `released_at` 的行。注意它与
-  `release_pending` 不是一回事：后者是"试过、失败了"，前者还包括"从来没走到确认那一步"
-  （进程崩溃、任务丢失）。
-- **每台实例跑了多久**：`released_at - allocated_at`。这是每场对局服务器成本的口径。
-
-```bash
-# 全部台账（最近的在最上面）
-BACKEND_DATABASE_URL=postgres://... go run ./tools/allocation-report
-
-# 只差"可能还在计费"的行
-go run ./tools/allocation-report -unreleased -since 24h
-
-# 给脚本/看板用
-go run ./tools/allocation-report -json | jq '.[] | select(.unreleased)'
-```
-
-报告末尾会汇总 `N allocations, M unreleased, Xs of instance time`。工具直接用进程相同的
-store/service，所以口径不会与线上漂移。
-
-指标（reconciler 每轮发布，需要开启 `BACKEND_RECONCILE_INTERVAL`）：
-
-| 指标 | 含义 | 建议用法 |
-|---|---|---|
-| `backend_unreleased_allocations` | 有分配、无确认释放的会话数 | 告警候选：`> 0` 持续 15 分钟；正常应为 0 |
-| `backend_unreleased_oldest_seconds` | 最老那台漂了多久 | 判断是"刚分配"还是"真卡住" |
-
-与 11.8 的关系：11.8 的 `release_pending_*` 衡量**重试积压**；本节的 `unreleased_*` 衡量
-**从未确认**。两者都为 0 才说明没有逃逸的实例。
-
-### 11.10 观测接入与容量基线
-
-**接线**（可选 profile，不影响后端启动）：
-
-```bash
-docker compose -f deploy/docker-compose.prod.yml --profile observability up -d prometheus
-curl -s http://127.0.0.1:9090/api/v1/rules | jq '.data.groups[].rules[].name'
-```
-
-规则文件 `deploy/prometheus/hape.rules.yml` 共 6 条（spec 0019）：
-
-| 告警 | 看什么 | 严重级 |
-|---|---|---|
-| `DedicatedServerReleaseStuck` | 回收重试积压 | warning |
-| `UnreleasedAllocation` | 有分配、无确认释放（可能仍在计费） | warning |
-| `SessionsStuckAllocating` | 分配超过 3 分钟 | warning |
-| `ZombieSession` | ready/in_progress 超过 30 分钟 | warning |
-| `HighServerErrorRatio` | 5xx 比例 > 1%（5 分钟） | critical |
-| `EconomyInternalError` | 钱包/账本操作出现 500 | critical |
-
-前置条件：**必须开启 `BACKEND_RECONCILE_INTERVAL`**（生产 compose 默认 30s）。没开时业务 gauge 不存在，
-告警不会误报，但也永远不会响——这一条要进部署检查单。
-
-CI 会跑 `promtool check rules` 与 `promtool check config`；另有一条测试断言"规则里引用的每个指标
-都真的被导出"（否则告警是假覆盖）。
-
-**压测基线**（本机、单进程、dev auth、本地 allocator、loopback）：
-
-```bash
-go run ./tools/loadtest -matches 400 -concurrency 25            # 内存 store
-BACKEND_DATABASE_URL=... go run ./tools/loadtest -matches 200 -concurrency 10   # Postgres
-```
-
-| 场景 | 吞吐 | total p50 | total p99 |
-|---|---|---|---|
-| 内存 store（并发 25） | 307 场/秒 | 80ms | 95ms |
-| Postgres store（并发 10） | 121 场/秒 | 59ms | 537ms |
-
-怎么读：两行并发不同，p50 不可横比；Postgres 的尾巴来自连接池与行锁竞争；
-这些数字是**本机形态的天花板量级**，不是生产容量承诺。真实容量需要多机 + 真实网络 + soak。
+指标、告警规则、分配台账与压测基线都在 **`docs/observability.md`**；SLO 目标在
+`docs/slo.md`。部署完成后照着 observability 一文接 Prometheus、看回收状态、跑压测。
