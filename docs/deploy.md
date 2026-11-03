@@ -167,7 +167,7 @@ M0 没有可部署目标，所以这一步是模板，不是已验证的流水�
 ## 9. 已知坑（第一次构建最可能踩的）
 
 1. **base 镜像 tag 不存在**：`golang:1.27-alpine` 与 `alpine:3.20` 是按 `go.mod`
-   的 `go 1.27.0` 挑的，若内网镜像源缺这个 tag，用 `--build-arg GO_IMAGE=` 换掉。
+   的 `go 1.27.3` 挑的，若内网镜像源缺这个 tag，用 `--build-arg GO_IMAGE=` 换掉。
 2. **`go mod download` 层报错**：今天 `go.mod` 没有依赖，这层几乎不会失败；一旦
    加了依赖而没提交 `go.sum`，这层会失败——那是真错误，不要去改 Dockerfile。
 3. **健康检查一直 unhealthy**：检查的是 `127.0.0.1:8080`，若改了 `BACKEND_ADDR`

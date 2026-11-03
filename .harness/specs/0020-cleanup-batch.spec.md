@@ -163,7 +163,7 @@ staticcheck/govulncheck 的旧版本在 Go 1.27 下编译不过，而 go.mod 还
 
 | 项 | 落地 | 验证 |
 |---|---|---|
-| 工具链统一 | 根 `go.mod` 1.23.0 → **1.27.0**；`Dockerfile` / `Dockerfile.ds` 的 `GO_IMAGE` → `golang:1.27-alpine`；CI 四个 `go-version-file: go.mod` 自动跟随 | CI 全绿；本机 `go1.27.3` 就是实际跑过的版本 |
+| 工具链统一 | 根 `go.mod` 1.23.0 → **1.27.3**（补丁版本一起钉：1.27.0 的标准库有两个可达 HTTP/2 漏洞，CI 的 `govulncheck` 第一次跑就抓到了）；`Dockerfile` / `Dockerfile.ds` 的 `GO_IMAGE` → `golang:1.27-alpine`；CI 四个 `go-version-file: go.mod` 自动跟随 | CI 全绿；本机 `go1.27.3` 就是实际跑过的版本 |
 | staticcheck | CI `verify` job + `scripts/verify.{sh,ps1}`；**版本钉住 v0.8.2** | 首次跑出 5 条真问题（死代码、测试里被丢弃的 status），已全部修掉，不是抑制 |
 | govulncheck |同上，钉 v1.9.0；**可达漏洞 = 构建失败** | 首次跑出 3 个可达漏洞，见下 |
 | 覆盖率 | `scripts/coverage-check.sh`：不含 `tools/` 的地板 58%（当前 60.5%），CI 强制，本地无数据库时只报告 | 本地负例：`COVERAGE_MIN=99` → 退出 1；告警文案给出实际值 |
