@@ -286,11 +286,11 @@
 <tbody>
 <tr><td>account</td><td><code>players</code></td><td>后端玩家档案；<code>external_id</code> 唯一（= Nakama 用户）</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td>team</td><td><code>teams</code>, <code>team_members</code></td><td>队伍与成员角色；一人一队、单 owner</td><td><span class="badge ok">✅</span></td></tr>
-<tr><td>matchmaking</td><td><code>tickets</code></td><td>排队票据 + 入队时 MMR 快照（不由客户端给）</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>matchmaking</td><td><code>matchmaking_tickets</code></td><td>排队票据 + 入队时 MMR 快照（不由客户端给）</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td>session</td><td><code>sessions</code>, <code>session_players</code>, <code>match_results</code>, <code>match_player_results</code></td><td>会话状态机、参战名单、权威战报与每人明细、回收待重试标记</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td>progress</td><td><code>player_progress</code>, <code>progress_grants</code></td><td>累计经验/等级 + 幂等入账流水</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td>economy</td><td><code>wallets</code>, <code>ledger_entries</code></td><td>余额（非负约束）+ 账本流水（幂等键唯一）</td><td><span class="badge ok">✅</span></td></tr>
-<tr><td>rank</td><td><code>ratings</code>, <code>mmr_events</code></td><td>评分与变更事件（可回溯为什么涨）</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td>rank</td><td><code>player_ratings</code>, <code>rating_events</code></td><td>评分与变更事件（可回溯为什么涨）</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td>记账</td><td><code>schema_migrations</code></td><td>已应用迁移 + sha256；改旧迁移会被拒</td><td><span class="badge ok">✅</span></td></tr>
 </tbody>
 </table>

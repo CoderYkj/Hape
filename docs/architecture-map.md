@@ -167,11 +167,11 @@ graph TB
 |---|---|---|
 | account | `players` | ✅ |
 | team | `teams`、`team_members` | ✅ |
-| matchmaking | `tickets` | ✅ |
+| matchmaking | `matchmaking_tickets` | ✅ |
 | session | `sessions`、`session_players`、`match_results`、`match_player_results` | ✅ ＋ 0003 的 `release_pending`/`release_attempts` |
 | progress | `player_progress`、`progress_grants` | ✅ |
 | economy | `wallets`、`ledger_entries` | ✅ |
-| rank | `ratings`、`mmr_events` | ✅ |
+| rank | `player_ratings`、`rating_events` | ✅ |
 | 迁移记账 | `schema_migrations` | ✅ 3 个迁移，含 checksum 防篡改 |
 
 ---

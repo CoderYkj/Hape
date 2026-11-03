@@ -90,6 +90,17 @@ switch ($Action) {
         $postgres = Find-PgTool 'postgres'
         $already = Get-Process postgres -ErrorAction SilentlyContinue
         if ($already) { Write-Host "postgres is already running (pid $($already[0].Id))" -ForegroundColor Yellow; break }
+        # A hard-killed postmaster leaves postmaster.pid behind, and postgres then refuses
+        # to start with "lock file already exists". Detect that explicitly: without this
+        # the symptom is a confusing timeout instead of one clear line.
+        $pidFile = Join-Path $data 'postmaster.pid'
+        if (Test-Path $pidFile) {
+            $stale = (Get-Content $pidFile -First 1).Trim()
+            if ($stale -match '^\d+$' -and -not (Get-Process -Id ([int]$stale) -ErrorAction SilentlyContinue)) {
+                Remove-Item $pidFile -Force
+                Write-Host "removed a stale postmaster.pid (pid $stale was gone)" -ForegroundColor Yellow
+            }
+        }
         # Start-Process, not pg_ctl: pg_ctl leaves the postmaster attached to the
         # console, which means a wrapper script never returns.
         $proc = Start-Process -FilePath $postgres `
@@ -104,7 +115,8 @@ switch ($Action) {
                 return
             }
         }
-        throw "postgres did not become ready; see $log"
+        $tail = (Get-Content $log -Tail 5 -ErrorAction SilentlyContinue) -join ' | '
+        throw "postgres did not become ready on 127.0.0.1:$Port; last log lines: $tail"
     }
     'stop' {
         & (Find-PgTool 'pg_ctl') -D $data -m fast stop
