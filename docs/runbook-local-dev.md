@@ -96,6 +96,9 @@ dev 模式下 token 必须是 `dev-player-<player_id>` 或 `dev-service`；
    Nakama 的桥接是 **Go 插件**（`nakama/modules`），由 `nakama/Dockerfile` 在官方
    `nakama-pluginbuilder` 镜像里编进 Nakama 镜像（同 tag + `--trimpath`，ADR 0011）。
    **不要在宿主机上编 `.so` 再挂进去**——工具链不同会让 `plugin.Open` 失败，Nakama 直接起不来。
+   改 Nakama 版本后先跑 `sh scripts/nakama-version-check.sh`：它从该版本的 go.mod 里读出应有的
+   `nakama-common` 版本，比对 Dockerfile 的 tag、compose 的默认 tag 与 `go.mod` 三处（要网络，
+   不要 Docker）。CI 的 `nakama-module` 与 `nakama` 两个 job 都跑它，后者查的是镜像里实际的 `.so`。
 2. 后端用真实凭证集：`BACKEND_DEV_AUTH=false` +
    `BACKEND_SERVICE_CREDENTIALS=nakama=<secret>:account`。Nakama 容器用同名变量
    `BACKEND_SERVICE_TOKEN` 承载这条 secret；scope 必须覆盖它要调的 service，否则 403。

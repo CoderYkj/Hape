@@ -216,6 +216,11 @@ jobs:
         working-directory: nakama/modules
         run: go test ./...
 
+      # ADR 0011: the Nakama tag, the tag compose runs and the pinned nakama-common must move
+      # together, and the mapping is read from the release's own go.mod rather than trusted.
+      - name: the three versions that must move together agree
+        run: sh scripts/nakama-version-check.sh
+
       - name: compile the plugin (not the deployment artifact)
         working-directory: nakama/modules
         run: |
@@ -280,11 +285,19 @@ jobs:
             grep "gamemodule loaded" /tmp/nakama.log
             exit 0
           fi
-          echo "::error title=runtime module missing::the Lua module did not register rpc=login"
+          echo "::error title=runtime module missing::the Go plugin did not register rpc=login"
           # A Go plugin that fails plugin.Open mentions "plugin" and "module"; the Lua-era
           # greps did not, so an ABI failure used to hide in the tail of the log.
           grep -iE "error|fatal|plugin|\.so|module" /tmp/nakama.log | tail -40 || true
           exit 1
+
+      # Source consistency is checked in `nakama-module`; this one checks the artifact that
+      # actually gets loaded - a .so can disagree with go.mod if the image was built stale.
+      - name: the shipped plugin was built against the pinned nakama-common
+        run: |
+          tag=$(sh scripts/nakama-version-check.sh --image-tag)
+          docker run --rm --entrypoint cat "$tag" /nakama/data/modules/gamemodule.buildinfo > /tmp/gamemodule.buildinfo
+          sh scripts/nakama-version-check.sh --buildinfo /tmp/gamemodule.buildinfo
 
       - name: login through the module
         run: |

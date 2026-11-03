@@ -28,6 +28,9 @@ CI 除了 `verify` 还有三个 job，专做本机做不了的事：
 > （宿主镜像带 `--trimpath` 构建），一度改用 Lua（ADR 0009）。**ADR 0011 已撤回该决定**：
 > 插件改在官方 `nakama-pluginbuilder` 镜像里、同 tag、`--trimpath` 构建，Lua 模块已删除。
 > 换 Nakama 版本时，`nakama/Dockerfile` 的 tag、`nakama-common` 版本、运行时镜像三者必须一起动。
+> 这句话现在有门禁：`scripts/nakama-version-check.sh` 从该 Nakama 版本自己发布的 go.mod 里读
+> `nakama-common` 的应有版本，比对 Dockerfile ARG / compose 默认 tag / `go.mod` 三处；
+> `nakama-module` 校验源码，`nakama` job 用镜像里的 `gamemodule.buildinfo` 校验实际加载的 `.so`。
 
 `-race` 在 CI 必开：这个后端到处是 `sync.Mutex` + map，数据竞争是真实风险，不是洁癖。
 

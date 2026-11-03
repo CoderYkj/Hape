@@ -72,6 +72,10 @@ CI `nakama` job：
 
 ## 7. 未决
 
-- [ ] 换 Nakama 版本时的自动校验：CI 可以断言 `nakama --version` 与 pluginbuilder tag、
-      `nakama-common` 版本三者一致，避免人工漏改。
+- [x] 换 Nakama 版本时的自动校验：`scripts/nakama-version-check.sh` 断言
+      `nakama/Dockerfile` 的 `ARG NAKAMA_VERSION`、compose 的默认 tag、`nakama/modules/go.mod`
+      里的 `nakama-common` 三者一致。**映射不靠人记**：它从该 Nakama 版本自己发布的 go.mod
+      里读（模块代理取 `github.com/heroiclabs/nakama/v3@v<x.y.z>.mod`），所以升级时只要跟着
+      报错改三处即可。CI 跑两遍：`nakama-module` 校验源码，`nakama` 用 `go version -m` 落进
+      镜像的 `gamemodule.buildinfo` 校验**实际加载的 .so**（源码一致但镜像构建陈旧的情况也挡得住）。
 - [ ] 插件热更新（Nakama 不支持运行时换插件；现在靠重启）。

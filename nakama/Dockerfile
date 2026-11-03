@@ -28,9 +28,15 @@ COPY modules/ ./
 # (Nakama's own Dockerfile uses it) or the package hashes differ.
 RUN CGO_ENABLED=1 go build --trimpath --buildmode=plugin -o /out/gamemodule.so .
 
+# Record what the artifact was actually built against. scripts/nakama-version-check.sh reads
+# this in CI, so "the plugin and the server agree" is asserted on the .so that ships, not only
+# on go.mod.
+RUN go version -m /out/gamemodule.so > /out/gamemodule.buildinfo
+
 # ---------------------------------------------------------------------------
 # runtime
 # ---------------------------------------------------------------------------
 FROM heroiclabs/nakama:${NAKAMA_VERSION}
 
 COPY --from=build /out/gamemodule.so /nakama/data/modules/gamemodule.so
+COPY --from=build /out/gamemodule.buildinfo /nakama/data/modules/gamemodule.buildinfo
