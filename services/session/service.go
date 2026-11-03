@@ -253,6 +253,25 @@ func (s *Service) create(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// A slow allocation can outlive the stale sweep: a managed provider regularly takes
+	// 20-90s, and if SESSION_STALE_AFTER is set below that, the sweep closes the session
+	// while we are still waiting for a server. Returning a "failed" session that quietly
+	// owns a running instance is how an allocation leaks until the vendor's TTL; instead,
+	// record the allocation (so a failed release stays retryable) and hand the instance back.
+	if updated.State != StateAllocating {
+		s.log.WarnContext(r.Context(), "allocation finished after the session closed; releasing the server",
+			"session_id", id, "allocation_id", allocation.ID, "state", updated.State)
+		if releaseErr := s.alloc.Release(r.Context(), allocation.ID); releaseErr != nil {
+			s.log.ErrorContext(r.Context(), "releasing the orphaned allocation failed; scheduling a retry",
+				"session_id", id, "allocation_id", allocation.ID, "err", releaseErr)
+			s.markReleasePending(r.Context(), id, releaseErr)
+		}
+		return nil, apierr.Unavailable("the session closed while its server was starting; the allocation was released").
+			WithDetail("session_id", id).
+			WithDetail("session_state", updated.State)
+	}
+
 	s.log.InfoContext(r.Context(), "session allocating", "session_id", id, "match_id", req.MatchID,
 		"provider", allocation.Provider, "address", allocation.Address)
 	return CreateSessionResponse{Session: updated, RuntimeToken: updated.RuntimeToken}, nil
@@ -410,6 +429,12 @@ func (s *Service) submitResult(r *http.Request) (any, error) {
 			s.log.WarnContext(r.Context(), "release after match failed; scheduling a retry",
 				"session_id", sessionID, "allocation_id", updated.AllocationID, "err", err)
 			s.markReleasePending(r.Context(), sessionID, err)
+		} else {
+			// The money path deserves a line of its own: "we confirmed this instance is gone"
+			// is what an operator greps for after a billing question, and until now only the
+			// failures were logged.
+			s.log.InfoContext(r.Context(), "match server released",
+				"session_id", sessionID, "allocation_id", updated.AllocationID)
 		}
 	}
 
@@ -464,6 +489,9 @@ func (s *Service) ExpireStale(ctx context.Context, now time.Time, staleAfter tim
 			s.log.WarnContext(ctx, "release after expiry failed; scheduling a retry",
 				"session_id", stale.ID, "allocation_id", stale.AllocationID, "err", err)
 			s.markReleasePending(ctx, stale.ID, err)
+		} else {
+			s.log.InfoContext(ctx, "expired session's server released",
+				"session_id", stale.ID, "allocation_id", stale.AllocationID)
 		}
 		s.log.WarnContext(ctx, "session expired", "session_id", stale.ID, "match_id", stale.MatchID,
 			"provider", stale.Provider, "allocation_id", stale.AllocationID, "stale_state", StateFailed)

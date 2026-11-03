@@ -27,6 +27,10 @@ const serviceToken = "dev-service"
 type fakeAllocator struct {
 	fail     bool
 	released []string
+	// onAllocate runs inside Allocate, before it returns: the test uses it to close the
+	// session while the "provider" is still working, which is what a slow allocation plus a
+	// stale sweep looks like from the handler's side.
+	onAllocate func()
 	// releaseErr makes the next release fail, which is how "the provider did not let go"
 	// is scripted. Nil means a release succeeds.
 	releaseErr error
@@ -35,6 +39,9 @@ type fakeAllocator struct {
 func (f *fakeAllocator) Provider() string { return "fake" }
 
 func (f *fakeAllocator) Allocate(context.Context, battlealloc.Request) (battlealloc.Allocation, error) {
+	if f.onAllocate != nil {
+		f.onAllocate()
+	}
 	if f.fail {
 		return battlealloc.Allocation{}, errors.New("provider quota exceeded")
 	}
@@ -601,5 +608,101 @@ func TestReleaseStatsDescribesTheBacklog(t *testing.T) {
 	// The clock is a minute ahead of the session, so the age must be about a minute.
 	if stats.OldestSeconds < 55 || stats.OldestSeconds > 65 {
 		t.Fatalf("oldest = %ds, want ~60s", stats.OldestSeconds)
+	}
+}
+
+// TestAllocationRacingTheStaleSweepIsReleased pins the fix for a real race found against the
+// live provider: a managed allocation can take longer than SESSION_STALE_AFTER, so the sweep
+// closes the session while the handler is still waiting. The instance then has no owner.
+//
+// The contract: the allocation is recorded (so a failed release stays retryable), the server
+// is released immediately, and the caller gets 503 instead of a "failed" session holding a
+// running server.
+func TestAllocationRacingTheStaleSweepIsReleased(t *testing.T) {
+	alloc := &fakeAllocator{}
+	h := newHarness(t, alloc, &fakeSink{})
+
+	alloc.onAllocate = func() {
+		memory, ok := h.store.(*Memory)
+		if !ok {
+			t.Fatalf("harness store is %T, want *Memory", h.store)
+		}
+		for id := range memory.byID {
+			if _, err := memory.Update(context.Background(), id, func(sp *Session) error {
+				sp.State = StateFailed
+				return nil
+			}); err != nil {
+				t.Fatalf("sweeping the session mid-allocation: %v", err)
+			}
+		}
+	}
+
+	status, body := h.do(http.MethodPost, "/v1/session/sessions", map[string]any{
+		"match_id": "m_race",
+		"players":  []string{"p_1", "p_2"},
+	}, h.auth)
+	h.expect(status, http.StatusServiceUnavailable, "create losing the race with the sweep")
+	if code, _ := nested(t, body, "error", "code").(string); code != "unavailable" {
+		t.Fatalf("error code = %q, want unavailable", code)
+	}
+
+	// The instance was handed back, not abandoned.
+	if len(alloc.released) != 1 {
+		t.Fatalf("released %d allocations, want 1 (%v)", len(alloc.released), alloc.released)
+	}
+
+	// And the allocation stayed on the session record: that is what makes a *failed* release
+	// retryable instead of lost.
+	memory := h.store.(*Memory)
+	for _, session := range memory.byID {
+		if session.AllocationID == "" {
+			continue
+		}
+		if session.ReleasePending {
+			t.Fatal("a successful release must not leave the session pending")
+		}
+		return
+	}
+	t.Fatal("the allocation was not recorded on the session")
+}
+
+// TestRaceWithAnUnconfirmedReleaseStaysRetryable is the other half: if handing the instance
+// back fails, the session must stay pending so the reconciler keeps trying.
+func TestRaceWithAnUnconfirmedReleaseStaysRetryable(t *testing.T) {
+	alloc := &fakeAllocator{releaseErr: errors.New("provider still running")}
+	h := newHarness(t, alloc, &fakeSink{})
+
+	alloc.onAllocate = func() {
+		memory := h.store.(*Memory)
+		for id := range memory.byID {
+			_, _ = memory.Update(context.Background(), id, func(sp *Session) error {
+				sp.State = StateFailed
+				return nil
+			})
+		}
+	}
+
+	status, _ := h.do(http.MethodPost, "/v1/session/sessions", map[string]any{
+		"match_id": "m_race_pending",
+		"players":  []string{"p_1", "p_2"},
+	}, h.auth)
+	h.expect(status, http.StatusServiceUnavailable, "create losing the race with a failing release")
+
+	memory := h.store.(*Memory)
+	found := false
+	for _, session := range memory.byID {
+		if session.AllocationID == "" {
+			continue
+		}
+		found = true
+		if !session.ReleasePending {
+			t.Fatal("an unconfirmed release must be recorded as pending")
+		}
+		if session.ReleaseAttempts != 1 {
+			t.Fatalf("release attempts = %d, want 1", session.ReleaseAttempts)
+		}
+	}
+	if !found {
+		t.Fatal("the allocation was not recorded on the session")
 	}
 }

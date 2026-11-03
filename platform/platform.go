@@ -144,6 +144,14 @@ func New(cfg Config) (*Platform, error) {
 	if staleAfter <= 0 {
 		staleAfter = 5 * time.Minute
 	}
+	// A stale threshold below the allocator's own ready timeout means the sweep can close a
+	// session while its server is still starting - the race the session service now handles by
+	// releasing the allocation, but which turns every slow allocation into a 503. Warn loudly
+	// instead of failing: the default (5m) already clears the default (3m).
+	if cfg.Allocator == "edgegap" && cfg.AllocatorOverride == nil && staleAfter <= battlealloc.DefaultReadyTimeout {
+		log.Warn("session stale threshold is not above the allocator ready timeout: slow allocations will race the sweep",
+			"session_stale_after", staleAfter, "allocator_ready_timeout", battlealloc.DefaultReadyTimeout)
+	}
 	p := &Platform{
 		log:               log,
 		alloc:             alloc,

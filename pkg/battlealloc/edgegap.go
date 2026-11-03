@@ -44,6 +44,12 @@ type Edgegap struct {
 	now       func() time.Time
 }
 
+// DefaultReadyTimeout is how long an allocation may take before it is abandoned. It is
+// exported because it is also the lower bound for the session stale threshold: sweeping a
+// session while its allocation is still in flight is a race, and the session service now
+// detects it, but a configuration where it *cannot* happen is better.
+const DefaultReadyTimeout = 3 * time.Minute
+
 // EdgegapConfig configures the adapter. Zero values get sensible defaults, except
 // Token/AppName which are required.
 type EdgegapConfig struct {
@@ -96,7 +102,7 @@ func NewEdgegap(cfg EdgegapConfig) (*Edgegap, error) {
 		cfg.PollInterval = 2 * time.Second
 	}
 	if cfg.ReadyTimeout <= 0 {
-		cfg.ReadyTimeout = 3 * time.Minute
+		cfg.ReadyTimeout = DefaultReadyTimeout
 	}
 	if cfg.StopTimeout <= 0 {
 		// Teardown is usually much faster than startup, but it is not instant and the
