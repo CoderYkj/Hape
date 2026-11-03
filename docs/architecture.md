@@ -167,7 +167,7 @@ CI 承担的是本机做不到的那部分：
 | `assert the database suites did not skip` | skip 与 pass 在汇总行里长得一样，所以 grep `SKIP:` 命中就让构建失败 |
 | `contract drift` | `apigen -check`：手改 `api/openapi/*.json` 会被挡下 |
 | `image` / `compose` 两个 job | 本机没有 Docker；CI 构建镜像、以非 root 跑起来探活，再拉起 compose（含 Postgres）、跑迁移与探针、并断言一次请求真的落了库 |
-| `nakama-module` job | 插件的**快速编译检查**（`go vet` + `-buildmode=plugin`）：这里的产物**不用于部署**；真构建在 `nakama` job 的镜像里，用官方 pluginbuilder 对齐工具链 |
+| `nakama-module` job | 插件的**快速编译检查**（`go vet` + `-buildmode=plugin`）：这里的产物**不用于部署**；真构建在 `nakama` job 的镜像里，用官方 pluginbuilder 对齐工具链。两个 job 都跑 `scripts/nakama-version-check.sh`（Nakama tag / compose tag / `nakama-common` 三方一致，映射取自该版本自己的 go.mod），后者查的是镜像里 `.so` 的 buildinfo |
 | `nakama` job | **唯一可信的桥接验证**：构建插件镜像 → 起真实 Nakama + 后端 → 断言 `gamemodule loaded` → 跑「设备登录 → RPC `login` → 后端账号 → 后端读取」→ 断言 players 表落了行 |
 
 本机那套（Windows、免安装 Postgres 16.4、端口 55432）见 `docs/postgres-local.md`。
