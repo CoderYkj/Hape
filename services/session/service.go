@@ -16,13 +16,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"gamebackend/pkg/api"
 	"gamebackend/pkg/apierr"
 	"gamebackend/pkg/battlealloc"
 	"gamebackend/pkg/httpx"
+	"gamebackend/pkg/idgen"
 )
 
 // ResultSink receives an accepted battle report. The platform wires it to
@@ -202,7 +202,9 @@ func (s *Service) create(r *http.Request) (any, error) {
 
 	// Time-based, not a process-local counter: with a persistent store, s_1 from
 	// the previous process is still on disk, and a counter restarts at 1.
-	id := "s_" + strconv.FormatInt(s.now().UnixNano(), 36)
+	// Not a bare timestamp: two concurrent creates in the same clock tick would get the same
+	// id and the second one would 409. See pkg/idgen.
+	id := idgen.New("s_")
 	// Minted before allocation on purpose: a managed provider injects it into the
 	// instance environment, so it has to exist by the time we ask for a server.
 	runtimeToken, err := newRuntimeToken()
@@ -721,6 +723,9 @@ func (s *Service) ReleaseStats(ctx context.Context, now time.Time) (ReleaseStats
 	return stats, nil
 }
 
+// ErrNoCensus is returned when the store cannot report session state populations.
+var ErrNoCensus = errors.New("session store cannot report a state census")
+
 // ErrNoAllocationLedger is returned when the active store cannot enumerate allocations, so
 // the ledger report is impossible in this deployment.
 var ErrNoAllocationLedger = errors.New("session store cannot enumerate allocations")
@@ -808,4 +813,16 @@ func (s *Service) Allocations(ctx context.Context, q AllocationQuery, now time.T
 		rows = append(rows, row)
 	}
 	return rows, nil
+}
+
+// Census reports the population of the states that can leak a server or strand a player.
+//
+// The gauge names it feeds are the input to two alerts: "allocating for minutes" (a provider
+// that is not answering) and "ready/in_progress for half an hour" (a match nobody finished).
+func (s *Service) Census(ctx context.Context, now time.Time) (StateCensus, error) {
+	provider, ok := s.store.(CensusProvider)
+	if !ok {
+		return StateCensus{}, ErrNoCensus
+	}
+	return provider.Census(ctx, now)
 }

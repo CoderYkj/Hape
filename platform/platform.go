@@ -445,6 +445,19 @@ func (p *Platform) ReconcileOnce(ctx context.Context, now time.Time) error {
 	}
 	p.metrics.SetGauge("unreleased_allocations", float64(len(unreleased)))
 	p.metrics.SetGauge("unreleased_oldest_seconds", float64(oldestUnreleased))
+
+	// Session states: the two alerts the rules file has been waiting for ("allocating for
+	// minutes" and "ready/in_progress for half an hour") need an age, not just a count.
+	census, err := p.Session.Census(ctx, now)
+	if err != nil {
+		return fmt.Errorf("session census: %w", err)
+	}
+	p.metrics.SetGauge("sessions_allocating", float64(census.Allocating))
+	p.metrics.SetGauge("sessions_ready", float64(census.Ready))
+	p.metrics.SetGauge("sessions_in_progress", float64(census.InProgress))
+	p.metrics.SetGauge("oldest_allocating_seconds", float64(census.OldestAllocating))
+	p.metrics.SetGauge("oldest_ready_seconds", float64(census.OldestReady))
+	p.metrics.SetGauge("oldest_in_progress_seconds", float64(census.OldestInProgress))
 	return nil
 }
 

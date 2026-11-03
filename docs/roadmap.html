@@ -85,13 +85,13 @@
 
   <!-- lane A -->
   <rect x="170" y="30" width="200" height="64" rx="8" fill="#fff" stroke="#a86b00"/>
-  <text x="184" y="54" font-size="13" font-weight="600">A1 Prometheus 接上</text>
+  <text x="184" y="54" font-size="13" font-weight="600">A1 Prometheus 接上 ✅</text>
   <text x="184" y="74" font-size="11.5" fill="#5b6472">抓 /metrics · 规则加载</text>
   <rect x="400" y="30" width="200" height="64" rx="8" fill="#fff" stroke="#8a8f98" stroke-dasharray="5 4"/>
-  <text x="414" y="54" font-size="13" font-weight="600">A2 补齐 4 条告警</text>
+  <text x="414" y="54" font-size="13" font-weight="600">A2 补齐 4 条告警 ✅</text>
   <text x="414" y="74" font-size="11.5" fill="#5b6472">5xx / 分配卡住 / 僵尸局 / 经济</text>
   <rect x="630" y="30" width="200" height="64" rx="8" fill="#fff" stroke="#8a8f98" stroke-dasharray="5 4"/>
-  <text x="644" y="54" font-size="13" font-weight="600">A3 压测</text>
+  <text x="644" y="54" font-size="13" font-weight="600">A3 压测（基线已出）</text>
   <text x="644" y="74" font-size="11.5" fill="#5b6472">每场对局的 QPS/延迟/并发</text>
   <rect x="860" y="30" width="200" height="64" rx="8" fill="#fff" stroke="#8a8f98" stroke-dasharray="5 4"/>
   <text x="874" y="54" font-size="13" font-weight="600">A4 SLO 与容量决策</text>
@@ -206,7 +206,7 @@
 <tr><td>M2 真实托管分配器</td><td>分配 + 回收 + 对账闭环</td><td>✅ 完成（spec 0015 + 0018）。仅剩厂商账单逐行比对；GameLift/Agones 与多实例选主按触发条件延后</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td>M3 Nakama 落地</td><td>账号 / RPC / 客户端链路</td><td>UE5 客户端实现（协议已验证，C++ 未编译）</td><td><span class="badge mid">🟡</span></td></tr>
 <tr><td>M4 服务拆分</td><td>rank / matchmaking 独立进程</td><td>消息总线或 gRPC、mTLS 或短期令牌、sink 改造、选主</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>M5 可观测与容量</td><td>指标、压测、SLO</td><td>主线 A 的四步</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>M5 可观测与容量</td><td>指标、压测、SLO</td><td>指标与 6 条告警 ✅、本机基线（内存 307 场/秒、PG 121 场/秒）🟡；缺 SLO 定义、soak、多机与真实网络</td><td><span class="badge mid">🟡</span></td></tr>
 </tbody>
 </table>
 
@@ -242,6 +242,7 @@
 <tr><td>凭证最小权限（默认拒绝 + 覆盖性测试 + 观察期）</td><td>spec 0016</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td>回收指标 + 1 条告警规则</td><td>spec 0015</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td><strong>分配台账</strong>（分配/释放时间线、实例秒数、未确认分配报表与指标）</td><td>spec 0018</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><strong>观测接线 + 6 条告警 + 压测基线</strong>（含并发 ID 碰撞修复）</td><td>spec 0019</td><td><span class="badge ok">✅</span></td></tr>
 </tbody>
 </table>
 

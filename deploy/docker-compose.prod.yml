@@ -60,6 +60,25 @@ services:
       BACKEND_EDGEGAP_LONGITUDE: ${BACKEND_EDGEGAP_LONGITUDE:-0}
       BACKEND_RECONCILE_INTERVAL: ${BACKEND_RECONCILE_INTERVAL:-30s}
       BACKEND_SESSION_STALE_AFTER: ${BACKEND_SESSION_STALE_AFTER:-5m}
+
+  # Optional: `docker compose ... --profile observability up -d`. It is not part of the
+  # default stack because the backend works without it; it is what turns the metrics into
+  # alerts (spec 0019).
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    profiles: ["observability"]
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - promdata:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - backend
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       # Bound to loopback: a reverse proxy terminates TLS and faces the internet.
@@ -83,3 +102,4 @@ services:
 
 volumes:
   pgdata:
+  promdata:

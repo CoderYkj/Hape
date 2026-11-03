@@ -195,7 +195,8 @@ graph TB
 |---|---|
 | JSON 日志（`request_id`/`op`/`status`/`caller`） | ✅ |
 | `/metrics`：请求计数、启动时间 | ✅ |
-| 业务指标：`backend_release_*`（5 条）、`backend_service_scope_*`（2 条） | ✅ spec 0015 / 0016 |
+| 业务指标：`backend_release_*`（5）、`backend_service_scope_*`（2）、`backend_sessions_*` / `backend_oldest_*`（6）、`backend_unreleased_*`（2） | ✅ spec 0015 / 0016 / 0018 / 0019 |
+| 告警规则：6 条（回收卡住、未确认分配、分配卡住、僵尸对局、5xx 比例、经济 500） | ✅ 规则 + promtool CI + 指标漂移测试（spec 0019） |
 | 告警规则文件（1 条：回收卡住 15m） | 🟡 文件在，未接真实 Prometheus |
 | rules/95 里的另外 4 条告警（5xx>1%、分配卡住、僵尸对局、经济 internal） | 🔜 只是文档 |
 

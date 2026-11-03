@@ -1,0 +1,23 @@
+# prometheus.yml - scrape and evaluate for a single-host deployment.
+#
+# The backend exposes /metrics on the same port as the API. There is no exporter and no
+# sidecar: one process, one scrape target, one rules file.
+#
+#   docker compose -f deploy/docker-compose.prod.yml --profile observability up -d prometheus
+#   curl -s http://127.0.0.1:9090/api/v1/rules | jq '.data.groups[].rules[].name'
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    deployment: hape
+
+rule_files:
+  - /etc/prometheus/hape.rules.yml
+
+scrape_configs:
+  - job_name: hape-backend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend:8080"]
+        labels:
+          service: platform

@@ -423,3 +423,44 @@ store/service，所以口径不会与线上漂移。
 
 与 11.8 的关系：11.8 的 `release_pending_*` 衡量**重试积压**；本节的 `unreleased_*` 衡量
 **从未确认**。两者都为 0 才说明没有逃逸的实例。
+
+### 11.10 观测接入与容量基线
+
+**接线**（可选 profile，不影响后端启动）：
+
+```bash
+docker compose -f deploy/docker-compose.prod.yml --profile observability up -d prometheus
+curl -s http://127.0.0.1:9090/api/v1/rules | jq '.data.groups[].rules[].name'
+```
+
+规则文件 `deploy/prometheus/hape.rules.yml` 共 6 条（spec 0019）：
+
+| 告警 | 看什么 | 严重级 |
+|---|---|---|
+| `DedicatedServerReleaseStuck` | 回收重试积压 | warning |
+| `UnreleasedAllocation` | 有分配、无确认释放（可能仍在计费） | warning |
+| `SessionsStuckAllocating` | 分配超过 3 分钟 | warning |
+| `ZombieSession` | ready/in_progress 超过 30 分钟 | warning |
+| `HighServerErrorRatio` | 5xx 比例 > 1%（5 分钟） | critical |
+| `EconomyInternalError` | 钱包/账本操作出现 500 | critical |
+
+前置条件：**必须开启 `BACKEND_RECONCILE_INTERVAL`**（生产 compose 默认 30s）。没开时业务 gauge 不存在，
+告警不会误报，但也永远不会响——这一条要进部署检查单。
+
+CI 会跑 `promtool check rules` 与 `promtool check config`；另有一条测试断言"规则里引用的每个指标
+都真的被导出"（否则告警是假覆盖）。
+
+**压测基线**（本机、单进程、dev auth、本地 allocator、loopback）：
+
+```bash
+go run ./tools/loadtest -matches 400 -concurrency 25            # 内存 store
+BACKEND_DATABASE_URL=... go run ./tools/loadtest -matches 200 -concurrency 10   # Postgres
+```
+
+| 场景 | 吞吐 | total p50 | total p99 |
+|---|---|---|---|
+| 内存 store（并发 25） | 307 场/秒 | 80ms | 95ms |
+| Postgres store（并发 10） | 121 场/秒 | 59ms | 537ms |
+
+怎么读：两行并发不同，p50 不可横比；Postgres 的尾巴来自连接池与行锁竞争；
+这些数字是**本机形态的天花板量级**，不是生产容量承诺。真实容量需要多机 + 真实网络 + soak。

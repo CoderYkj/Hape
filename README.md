@@ -219,7 +219,7 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 | M2 ✅ | 接真实托管分配器 | 完成：Edgegap 真机分配 4s / 释放回读 ~2s（spec 0015）、超时对账、回收重试、**分配台账**（spec 0018：`allocated_at`/`released_at` + `tools/allocation-report` + 未确认分配指标）。仅剩厂商账单逐行比对（运维动作，需账单数据）；GameLift/Agones 与多实例选主按触发条件延后 |
 | M3 🟡 | Nakama 落地 | 链路已完成并在 CI 真跑（设备登录 → RPC → 后端；客户端打完整一局，spec 0009/0013）。缺：UE5 客户端实现（引擎侧） |
 | M4 ⬜ | 服务拆分：rank / matchmaking 独立进程，加 gRPC 或消息队列 | 未开始；触发条件：多副本或多区域成为需求（见 `docs/roadmap.md`） |
-| M5 ⬜ | 可观测性与容量：指标落地、压测、SLO | 未开始；指标已出、告警 1 条，缺采集与基线（`docs/roadmap.md` 主线 A） |
+| M5 🟡 | 可观测性与容量：指标落地、压测、SLO | 指标与 6 条告警已就绪、Prometheus 接入由 CI 校验（spec 0019）；本机压测基线：内存 **307 场/秒**、Postgres **121 场/秒**。缺 SLO 定义、soak、多机与真实网络 |
 
 ## 许可
 

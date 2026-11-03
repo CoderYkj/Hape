@@ -129,6 +129,26 @@ type AllocationQuery struct {
 	Limit int
 }
 
+// StateCensus is the population of the states that can leak a server or strand a player
+// (spec 0019). It is what the allocating/zombie alerts watch: a count alone cannot tell
+// "three matches started a second ago" from "one match has been stuck for an hour".
+type StateCensus struct {
+	Allocating int
+	Ready      int
+	InProgress int
+	// OldestAllocating / OldestReady / OldestInProgress are seconds since the oldest session
+	// in that state was created (0 when the state is empty). created_at is an upper bound on
+	// "how long has this been stuck", which is the right direction for an alert.
+	OldestAllocating int64
+	OldestReady      int64
+	OldestInProgress int64
+}
+
+// CensusProvider is the optional store capability behind the state gauges.
+type CensusProvider interface {
+	Census(ctx context.Context, now time.Time) (StateCensus, error)
+}
+
 // AllocationLedger is the optional store capability behind M2's billing reconciliation: the
 // timeline of "when did we get a server" and "when did we confirm it gone".
 //
@@ -150,6 +170,13 @@ type Memory struct {
 func NewMemory() *Memory {
 	return &Memory{byID: map[string]Session{}, byMatch: map[string]string{}, results: map[string]FinishedMatch{}}
 }
+
+var (
+	_ Expirer          = (*Memory)(nil)
+	_ CensusProvider   = (*Memory)(nil)
+	_ AllocationLedger = (*Memory)(nil)
+	_ ReleaseTracker   = (*Memory)(nil)
+)
 
 func (m *Memory) Create(_ context.Context, session Session) (Session, error) {
 	// A brand new session has nothing to release yet; both stores agree on that, and
@@ -207,6 +234,37 @@ func (m *Memory) Update(_ context.Context, id string, mutate func(*Session) erro
 	}
 	m.byID[id] = session
 	return session, nil
+}
+
+// Census implements CensusProvider.
+func (m *Memory) Census(_ context.Context, now time.Time) (StateCensus, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var census StateCensus
+	for _, session := range m.byID {
+		age := int64(now.Sub(session.CreatedAt).Seconds())
+		if age < 0 {
+			age = 0
+		}
+		switch session.State {
+		case StateAllocating:
+			census.Allocating++
+			if age > census.OldestAllocating {
+				census.OldestAllocating = age
+			}
+		case StateReady:
+			census.Ready++
+			if age > census.OldestReady {
+				census.OldestReady = age
+			}
+		case StateInProgress:
+			census.InProgress++
+			if age > census.OldestInProgress {
+				census.OldestInProgress = age
+			}
+		}
+	}
+	return census, nil
 }
 
 // Allocations implements AllocationLedger.

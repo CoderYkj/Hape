@@ -307,6 +307,7 @@ var (
 	_ Expirer          = (*PG)(nil)
 	_ ReleaseTracker   = (*PG)(nil)
 	_ AllocationLedger = (*PG)(nil)
+	_ CensusProvider   = (*PG)(nil)
 )
 
 // RecordResult implements ResultRecorder.
@@ -392,4 +393,49 @@ func (s *PG) Allocations(ctx context.Context, q AllocationQuery) ([]Session, err
 		out = append(out, session)
 	}
 	return out, rows.Err()
+}
+
+// Census implements CensusProvider with one grouped query.
+func (s *PG) Census(ctx context.Context, now time.Time) (StateCensus, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
+	defer cancel()
+
+	rows, err := s.pool.Query(ctx,
+		`SELECT state, count(*), min(created_at)
+		   FROM sessions
+		  WHERE state IN ($1, $2, $3)
+		  GROUP BY state`,
+		StateAllocating, StateReady, StateInProgress)
+	if err != nil {
+		return StateCensus{}, err
+	}
+	defer rows.Close()
+
+	var census StateCensus
+	for rows.Next() {
+		var (
+			state  string
+			count  int
+			oldest time.Time
+		)
+		if err := rows.Scan(&state, &count, &oldest); err != nil {
+			return StateCensus{}, err
+		}
+		age := int64(now.Sub(oldest.UTC()).Seconds())
+		if age < 0 {
+			age = 0
+		}
+		switch state {
+		case StateAllocating:
+			census.Allocating = count
+			census.OldestAllocating = age
+		case StateReady:
+			census.Ready = count
+			census.OldestReady = age
+		case StateInProgress:
+			census.InProgress = count
+			census.OldestInProgress = age
+		}
+	}
+	return census, rows.Err()
 }

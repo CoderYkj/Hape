@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -312,17 +313,17 @@ func scrapeMetrics(t *testing.T, baseURL string) string {
 	return string(body)
 }
 
-// TestAlertRuleWatchesAMetricWePublish keeps the alert file and the code from drifting:
-// a rule on a metric nobody publishes is an alarm that can never fire, which is worse
-// than no alarm because it looks like coverage.
-func TestAlertRuleWatchesAMetricWePublish(t *testing.T) {
+// TestAlertRulesWatchMetricsWePublish is the drift guard for the rules file: every metric a
+// rule references must actually be exposed, otherwise the alert looks like coverage and can
+// never fire (spec 0019).
+func TestAlertRulesWatchMetricsWePublish(t *testing.T) {
 	raw, err := os.ReadFile("../deploy/prometheus/hape.rules.yml")
 	if err != nil {
 		t.Fatalf("read rules: %v", err)
 	}
-	want := "expr: backend_release_pending_sessions > 0"
-	if !strings.Contains(string(raw), want) {
-		t.Fatalf("the alert rule does not contain %q:\n%s", want, raw)
+	references := regexp.MustCompile(`backend_[a-z_]+`).FindAllString(string(raw), -1)
+	if len(references) == 0 {
+		t.Fatal("the rules file references no metrics")
 	}
 
 	app := newAppWith(t, platform.Config{Env: "test", DevAuth: true, Allocator: "local"})
@@ -331,9 +332,22 @@ func TestAlertRuleWatchesAMetricWePublish(t *testing.T) {
 	if err := app.ReconcileOnce(context.Background(), time.Now()); err != nil {
 		t.Fatalf("ReconcileOnce: %v", err)
 	}
-	// The metric the rule watches must actually be in the exposition, otherwise the rule
-	// silently matches nothing.
-	if body := scrapeMetrics(t, server.URL); !strings.Contains(body, "backend_release_pending_sessions{") {
-		t.Fatalf("the watched metric is not published:\n%s", body)
+	// The request counter only exists once something has been served, so serve one op: the
+	// rules reference it and the drift guard has to see it.
+	doJSON(t, server.URL, http.MethodPost, "/v1/account/sessions",
+		map[string]any{"external_id": "rules-drift"}, "dev-service")
+	body := scrapeMetrics(t, server.URL)
+
+	checked := map[string]bool{}
+	for _, name := range references {
+		if checked[name] {
+			continue
+		}
+		checked[name] = true
+		// Every exposed metric carries a service label, so the rendered series is `<name>{`.
+		if !strings.Contains(body, name+"{") {
+			t.Errorf("the rules reference %s but nothing exports it", name)
+		}
 	}
+	t.Logf("checked %d distinct metrics referenced by the rules", len(checked))
 }

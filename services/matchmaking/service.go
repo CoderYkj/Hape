@@ -9,12 +9,11 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
-	"time"
 
 	"gamebackend/pkg/api"
 	"gamebackend/pkg/apierr"
 	"gamebackend/pkg/httpx"
+	"gamebackend/pkg/idgen"
 )
 
 // DefaultMMRBand is how far apart two players may be to share a match.
@@ -187,7 +186,8 @@ func (s *Service) pop(r *http.Request) (any, error) {
 	// queue would mint m_ranked_1v1_1 again after a restart, and sessions_one_per_match
 	// would (correctly) refuse the second match. The counter is not a unique
 	// identifier, it is a convenience.
-	matchID := "m_" + queue + "_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	// Two pops on the same queue in the same clock tick must not mint the same match id.
+	matchID := "m_" + queue + "_" + idgen.New("")
 	tickets, err := s.store.Pop(r.Context(), queue, req.Count, DefaultMMRBand, matchID)
 	if err != nil {
 		if errors.Is(err, ErrNoWaiting) {

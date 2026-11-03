@@ -1,22 +1,16 @@
 # hape.rules.yml - alerting rules for the backend.
 #
-# One rule, because there is one failure that costs money quietly: a dedicated server the
-# provider never confirmed stopped. Everything else the backend does is either visible as
-# a 5xx in the request metrics or does not have a bill attached.
+# Six rules, one per thing that can quietly cost money or strand a player. Each is written
+# against a metric that exists in this repository, and CI runs `promtool check rules` so a
+# rule that does not parse (or names a metric nobody exports) cannot merge.
 #
-# Wire it up:
-#   rule_files:
-#     - /etc/prometheus/hape.rules.yml
-#   scrape_configs:
-#     - job_name: hape
-#       static_configs:
-#         - targets: ["127.0.0.1:8080"]   # same port as the API; /metrics is open
+# spec 0019.
 groups:
   - name: hape.battle
     rules:
-      # spec 0015: Release = stop request + read-back. A session in release_pending has
-      # had its stop accepted (possibly several times) while the provider still reports
-      # the instance as running - a recurring charge, not a cosmetic warning.
+      # spec 0015: Release = stop request + read-back. A session in release_pending has had
+      # its stop accepted (possibly several times) while the provider still reports the
+      # instance as running - a recurring charge, not a cosmetic warning.
       - alert: DedicatedServerReleaseStuck
         expr: backend_release_pending_sessions > 0
         for: 15m
@@ -25,8 +19,88 @@ groups:
         annotations:
           summary: "{{ $value }} dedicated server(s) could not be confirmed released"
           description: >-
-            The provider accepted the stop request but never stopped reporting the
-            instance as running. Check backend_release_max_attempts for how many retries
-            have failed, and the backend log for "release retry failed" lines naming the
-            allocation id.
+            The retry loop has failed to confirm the stop. Check
+            backend_release_max_attempts for how many attempts, and grep the backend log for
+            "release retry failed" to get the allocation id.
           runbook: "docs/deploy.md#118-回收回读的指标与告警"
+
+      # spec 0018: release_pending only covers "we tried and failed". This one also covers
+      # "we never got as far as confirming it" (a crash between allocating and recording, a
+      # lost task). It is the last line before the vendor's invoice.
+      - alert: UnreleasedAllocation
+        expr: backend_unreleased_allocations > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} allocation(s) exist with no confirmed release"
+          description: >-
+            An allocation was made and the provider never confirmed it stopped. Run
+            `go run ./tools/allocation-report -unreleased` on the host to see which sessions
+            and how long they have been outstanding.
+          runbook: "docs/deploy.md#119-分配台账对账用"
+
+      # The provider is not answering. 3 minutes is the allocator's own ready timeout: past
+      # it, the allocation has already been abandoned inside the process.
+      - alert: SessionsStuckAllocating
+        expr: backend_oldest_allocating_seconds > 180
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "a session has been allocating for {{ $value }}s"
+          description: >-
+            The allocator is not completing. Check the vendored provider's status page and the
+            backend log for "allocation failed"; the stale sweep will eventually fail the
+            session, but players are waiting meanwhile.
+
+      # A match that never reports is a server that keeps billing and a player who cannot
+      # play. 30 minutes is the documented threshold in rules/95.
+      - alert: ZombieSession
+        expr: (backend_oldest_ready_seconds > 1800) or (backend_oldest_in_progress_seconds > 1800)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "a session has been open for {{ $value }}s without finishing"
+          description: >-
+            Either the dedicated server never reported a result, or the report never landed.
+            Get the session id from the ledger/report, then check the DS logs and the
+            reconciliation sweep.
+
+  - name: hape.http
+    rules:
+      # rules/95's first item. The denominator is contract operations only (health and
+      # metrics endpoints are not instrumented), which is the right population for "the API
+      # is failing".
+      - alert: HighServerErrorRatio
+        expr: |
+          sum(rate(backend_requests_total{status=~"5.."}[5m]))
+            /
+          clamp_min(sum(rate(backend_requests_total[5m])), 0.001)
+            > 0.01
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value | humanizePercentage }} of API calls are 5xx"
+          description: >-
+            More than 1% of contract operations are failing with a server error. Check
+            backend_requests_total by op to find the affected operation, then the request log
+            for the matching op at level=ERROR.
+
+  - name: hape.economy
+    rules:
+      # Money operations failing once is worth a look: the settlement is transactional, so a
+      # 5xx here means a match did not pay out.
+      - alert: EconomyInternalError
+        expr: increase(backend_requests_total{op=~"economy\\..*",status="500"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "an economy operation returned 500"
+          description: >-
+            A wallet/ledger operation failed internally. Check the request log for
+            op=~"economy.*" and status=500; a settlement that hit this left its session
+            unfinanced, and the DS retry (same result_id) is the recovery path.

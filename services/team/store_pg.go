@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"gamebackend/pkg/apierr"
+	"gamebackend/pkg/idgen"
 	"gamebackend/pkg/pg"
 )
 
@@ -34,7 +35,7 @@ func (s *PG) Create(ctx context.Context, ownerID, name string) (Team, error) {
 	ctx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 
-	id := "t_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	id := idgen.New("t_")
 	now := time.Now().UTC()
 
 	err := pg.InTx(ctx, s.pool, func(tx pgx.Tx) error {

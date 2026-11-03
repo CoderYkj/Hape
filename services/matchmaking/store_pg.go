@@ -3,13 +3,13 @@ package matchmaking
 import (
 	"context"
 	"errors"
-	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"gamebackend/pkg/apierr"
+	"gamebackend/pkg/idgen"
 	"gamebackend/pkg/pg"
 )
 
@@ -36,7 +36,7 @@ func (s *PG) Create(ctx context.Context, ticket Ticket) (Ticket, error) {
 	if ticket.Party == nil {
 		ticket.Party = []string{}
 	}
-	id := "q_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	id := idgen.New("q_")
 
 	var (
 		createdAt time.Time
