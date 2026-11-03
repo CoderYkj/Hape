@@ -49,6 +49,13 @@ type Session struct {
 	// ReleaseAttempts counts the failed attempts, so "still pending after 20 tries" is
 	// visible instead of looking identical to "just failed once".
 	ReleaseAttempts int `json:"-" doc:"Internal: failed release attempts."`
+
+	// AllocatedAt is when the allocator handed over an instance. The allocation ledger
+	// (spec 0018) is built from this and ReleasedAt: together they answer "how long did
+	// this match's server run" and "is anything still unaccounted for".
+	AllocatedAt *time.Time `json:"-" doc:"Internal: when the allocator returned an instance."`
+	// ReleasedAt is when the provider confirmed the instance is gone (not when we asked).
+	ReleasedAt *time.Time `json:"-" doc:"Internal: when the release was confirmed."`
 }
 
 // PlayerResult is one player's authoritative outcome, reported by the server.
@@ -111,6 +118,26 @@ type ReleaseTracker interface {
 	PendingReleases(ctx context.Context, limit int) ([]Session, error)
 }
 
+// AllocationQuery filters the allocation ledger.
+type AllocationQuery struct {
+	// UnreleasedOnly keeps only sessions that hold an allocation with no confirmed release:
+	// the rows that could still be billing.
+	UnreleasedOnly bool
+	// Since keeps allocations at or after this instant (zero means no lower bound).
+	Since time.Time
+	// Limit caps the number of rows returned (zero means no cap).
+	Limit int
+}
+
+// AllocationLedger is the optional store capability behind M2's billing reconciliation: the
+// timeline of "when did we get a server" and "when did we confirm it gone".
+//
+// Separate from Store for the same reason Expirer and ReleaseTracker are: a store that cannot
+// scan does not implement it, and the caller reports that instead of pretending to.
+type AllocationLedger interface {
+	Allocations(ctx context.Context, q AllocationQuery) ([]Session, error)
+}
+
 // Memory is the in-memory Store.
 type Memory struct {
 	mu      sync.Mutex
@@ -129,6 +156,8 @@ func (m *Memory) Create(_ context.Context, session Session) (Session, error) {
 	// the SQL store relies on the column defaults.
 	session.ReleasePending = false
 	session.ReleaseAttempts = 0
+	session.AllocatedAt = nil
+	session.ReleasedAt = nil
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, exists := m.byID[session.ID]; exists {
@@ -178,6 +207,36 @@ func (m *Memory) Update(_ context.Context, id string, mutate func(*Session) erro
 	}
 	m.byID[id] = session
 	return session, nil
+}
+
+// Allocations implements AllocationLedger.
+func (m *Memory) Allocations(_ context.Context, q AllocationQuery) ([]Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []Session{}
+	for _, session := range m.byID {
+		if session.AllocatedAt == nil {
+			continue
+		}
+		if q.UnreleasedOnly && session.ReleasedAt != nil {
+			continue
+		}
+		if !q.Since.IsZero() && session.AllocatedAt.Before(q.Since) {
+			continue
+		}
+		out = append(out, session)
+	}
+	// Newest allocation first: a ledger read top-down should start with what just happened.
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].AllocatedAt.Equal(*out[j].AllocatedAt) {
+			return out[i].AllocatedAt.After(*out[j].AllocatedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
+	if q.Limit > 0 && len(out) > q.Limit {
+		out = out[:q.Limit]
+	}
+	return out, nil
 }
 
 // PendingReleases implements ReleaseTracker.

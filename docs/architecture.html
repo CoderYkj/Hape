@@ -114,7 +114,7 @@
 
   <rect x="440" y="428" width="340" height="76" rx="9" fill="#fff" stroke="#1a7f4b"/>
   <text x="458" y="454" font-size="14" font-weight="600">PostgreSQL 16 ✅</text>
-  <text x="458" y="476" font-size="12" fill="#5b6472">14 张表 · 3 个迁移 · 41 条约束断言</text>
+  <text x="458" y="476" font-size="12" fill="#5b6472">14 张表 · 4 个迁移 · 48 条约束断言</text>
 
   <rect x="440" y="548" width="340" height="76" rx="9" fill="#fff" stroke="#a86b00"/>
   <text x="458" y="574" font-size="14" font-weight="600">Prometheus 🟡</text>
@@ -336,7 +336,7 @@
 <tbody>
 <tr><td><code>verify</code></td><td>gofmt / vet / build / <code>go test -race</code>（含真库等价性）/ schema 断言 / 契约漂移</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td><code>image</code></td><td>后端镜像构建、非 root、探活、/metrics 可用</td><td><span class="badge ok">✅</span></td></tr>
-<tr><td><code>compose</code></td><td>postgres + backend 起栈、迁移、41 条断言、断言一次登录真的落库</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><code>compose</code></td><td>postgres + backend 起栈、迁移、48 条断言、断言一次登录真的落库</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td><code>nakama-module</code></td><td>Lua 模块在真实 Nakama 里注册成功</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td><code>nakama</code></td><td>设备登录 → RPC → 后端读取；以及客户端用 Nakama 身份打完整一局</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td><code>ops</code></td><td>迁移幂等 / append-only、备份恢复到新库、pg 客户端版本护栏</td><td><span class="badge ok">✅</span></td></tr>

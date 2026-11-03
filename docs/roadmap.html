@@ -203,7 +203,7 @@
 <table>
 <thead><tr><th>阶段</th><th>目标</th><th>还缺什么</th><th>状态</th></tr></thead>
 <tbody>
-<tr><td>M2 真实托管分配器</td><td>分配 + 回收 + 对账闭环</td><td>计费对账、GameLift/Agones 适配器、多实例选主</td><td><span class="badge mid">🟡 主体已通</span></td></tr>
+<tr><td>M2 真实托管分配器</td><td>分配 + 回收 + 对账闭环</td><td>✅ 完成（spec 0015 + 0018）。仅剩厂商账单逐行比对；GameLift/Agones 与多实例选主按触发条件延后</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td>M3 Nakama 落地</td><td>账号 / RPC / 客户端链路</td><td>UE5 客户端实现（协议已验证，C++ 未编译）</td><td><span class="badge mid">🟡</span></td></tr>
 <tr><td>M4 服务拆分</td><td>rank / matchmaking 独立进程</td><td>消息总线或 gRPC、mTLS 或短期令牌、sink 改造、选主</td><td><span class="badge todo">⬜</span></td></tr>
 <tr><td>M5 可观测与容量</td><td>指标、压测、SLO</td><td>主线 A 的四步</td><td><span class="badge todo">⬜</span></td></tr>
@@ -241,6 +241,7 @@
 <tr><td>凭证轮换（多凭证并行 + <code>caller=</code> 日志）</td><td>spec 0014</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td>凭证最小权限（默认拒绝 + 覆盖性测试 + 观察期）</td><td>spec 0016</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td>回收指标 + 1 条告警规则</td><td>spec 0015</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><strong>分配台账</strong>（分配/释放时间线、实例秒数、未确认分配报表与指标）</td><td>spec 0018</td><td><span class="badge ok">✅</span></td></tr>
 </tbody>
 </table>
 

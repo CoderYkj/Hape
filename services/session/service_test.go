@@ -706,3 +706,68 @@ func TestRaceWithAnUnconfirmedReleaseStaysRetryable(t *testing.T) {
 		t.Fatal("the allocation was not recorded on the session")
 	}
 }
+
+// TestAllocationLedgerRecordsTheTimeline is the report's happy path: one match, one server,
+// allocated and released, with the duration already derived.
+func TestAllocationLedgerRecordsTheTimeline(t *testing.T) {
+	h := newHarness(t, &fakeAllocator{}, &fakeSink{})
+	id := h.createSession("p_1", "p_2")
+	h.ready(id)
+	h.expectAfterReport(t, id)
+
+	now := time.Now().UTC().Add(time.Minute)
+	rows, err := h.app.Allocations(context.Background(), AllocationQuery{}, now)
+	if err != nil {
+		t.Fatalf("Allocations: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("ledger has %d rows, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.SessionID != id || row.Provider != "fake" || row.AllocationID != "alloc-1" {
+		t.Fatalf("unexpected ledger row: %+v", row)
+	}
+	if row.AllocatedAt.IsZero() {
+		t.Fatal("allocated_at was not recorded")
+	}
+	if row.ReleasedAt == nil {
+		t.Fatal("a successful release was not recorded")
+	}
+	if row.Unreleased {
+		t.Fatal("a confirmed release is still flagged as unreleased")
+	}
+	if row.InstanceSeconds < 0 {
+		t.Fatalf("instance seconds = %d", row.InstanceSeconds)
+	}
+}
+
+// TestAllocationLedgerShowsWhatIsStillUnaccounted pins the number that matters for billing:
+// an allocation with no confirmed release is the only thing that can still be charging.
+func TestAllocationLedgerShowsWhatIsStillUnaccounted(t *testing.T) {
+	alloc := &fakeAllocator{releaseErr: errors.New("provider still running")}
+	h := newHarness(t, alloc, &fakeSink{})
+	id := h.createSession("p_1", "p_2")
+	h.ready(id)
+	h.expectAfterReport(t, id)
+
+	now := time.Now().UTC().Add(30 * time.Second)
+	rows, err := h.app.Allocations(context.Background(), AllocationQuery{UnreleasedOnly: true}, now)
+	if err != nil {
+		t.Fatalf("Allocations: %v", err)
+	}
+	if len(rows) != 1 || rows[0].SessionID != id {
+		t.Fatalf("unreleased view = %+v, want the one session %s", rows, id)
+	}
+	row := rows[0]
+	if !row.Unreleased || row.ReleasedAt != nil {
+		t.Fatalf("expected an unreleased row, got %+v", row)
+	}
+	if !row.ReleasePending || row.ReleaseAttempts != 1 {
+		t.Fatalf("pending=%t attempts=%d, want true/1", row.ReleasePending, row.ReleaseAttempts)
+	}
+	// The clock is 30s past the allocation, so the age is about 30s (a second of slack for
+	// the allocation timestamp being taken slightly before `now` was computed).
+	if row.InstanceSeconds < 29 || row.InstanceSeconds > 31 {
+		t.Fatalf("instance seconds = %d, want ~30", row.InstanceSeconds)
+	}
+}

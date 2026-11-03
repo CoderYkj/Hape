@@ -389,3 +389,37 @@ BACKEND_SERVICE_SCOPE_ENFORCE=true
 验证方式（不需要真的厂商）：单测 `TestReconcileOncePublishesTheReleaseBacklog` 用一个
 "永远不释放"的假分配器跑完整链路——战报仍 200、会话进 pending、gauge 变 1、恢复后 gauge
 回 0 且 `confirmed_total` +1。
+
+### 11.9 分配台账（对账用）
+
+每次分配都会在会话上留下两个时间点：`allocated_at`（拿到实例）与 `released_at`（厂商**回读确认**
+实例已停止）。由此可以回答两个运营问题，而不必等厂商账单：
+
+- **哪些实例可能还在计费**：有 `allocated_at`、没有 `released_at` 的行。注意它与
+  `release_pending` 不是一回事：后者是"试过、失败了"，前者还包括"从来没走到确认那一步"
+  （进程崩溃、任务丢失）。
+- **每台实例跑了多久**：`released_at - allocated_at`。这是每场对局服务器成本的口径。
+
+```bash
+# 全部台账（最近的在最上面）
+BACKEND_DATABASE_URL=postgres://... go run ./tools/allocation-report
+
+# 只差"可能还在计费"的行
+go run ./tools/allocation-report -unreleased -since 24h
+
+# 给脚本/看板用
+go run ./tools/allocation-report -json | jq '.[] | select(.unreleased)'
+```
+
+报告末尾会汇总 `N allocations, M unreleased, Xs of instance time`。工具直接用进程相同的
+store/service，所以口径不会与线上漂移。
+
+指标（reconciler 每轮发布，需要开启 `BACKEND_RECONCILE_INTERVAL`）：
+
+| 指标 | 含义 | 建议用法 |
+|---|---|---|
+| `backend_unreleased_allocations` | 有分配、无确认释放的会话数 | 告警候选：`> 0` 持续 15 分钟；正常应为 0 |
+| `backend_unreleased_oldest_seconds` | 最老那台漂了多久 | 判断是"刚分配"还是"真卡住" |
+
+与 11.8 的关系：11.8 的 `release_pending_*` 衡量**重试积压**；本节的 `unreleased_*` 衡量
+**从未确认**。两者都为 0 才说明没有逃逸的实例。

@@ -94,7 +94,7 @@ tools/          apigen(生成 OpenAPI) / fakeds(假战斗服 + 厂商侧启动�
 ds/             参考 Dedicated Server：环境契约 + 幂等结算的可执行版本（spec 0012）
 api/openapi/    生成的接口契约（勿手改）
 db/migrations/  Postgres schema（0001+0002，已在 16.4 上执行；7 个域已接线）
-db/probes/      schema 约束的断言脚本（41 条，psql 可重跑）
+db/probes/      schema 约束的断言脚本（48 条，psql 可重跑）
 nakama/         Nakama Go 模块（RPC 桥接，未验证）
 deploy/         dev compose + 生产 compose（prod 用占位密钥拒绝启动）+ systemd 单元 + prometheus 告警规则
 Dockerfile      后端镜像：多阶段构建，alpine + 非 root 静态二进制（CI 构建并探活）
@@ -113,7 +113,7 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 - `go run ./tools/apigen -check` 无漂移
 - `platform` + `fakeds` 完整对局闭环跑通（`OK: full match loop completed`）
 - `db/migrations/0001_init.sql` 在真实 Postgres 16.4 上执行成功（13 张表）；
-  `db/probes/*.probe.sql` **41 条约束断言全 PASS**（0001 的 35 条 + 0003 的 6 条）
+  `db/probes/*.probe.sql` **48 条约束断言全 PASS**（0001 的 35 条 + 0003 的 6 条 + 0004 的 7 条）
   （幂等键、余额非负、状态机守卫、一会话一战报、一人一队都被数据库拒绝）
 - **七个域全部落库**：`platform` 连真库跑完 `fakeds` 全链路，14 张表全部出现对应行
   （玩家、排队票、会话、参战名单、战报头 + 每人明细、经验 + 入账流水、钱包 + 流水、
@@ -152,7 +152,7 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
   本机没有 C 编译器，`-race` 与插件编译只能在这里真跑——所以它们不是"本机已验证"，
   而是"CI 已验证"。
 - **镜像与编排**：CI 里 `docker build` 后以非 root（uid 10001）运行并探活；
-  `docker compose up postgres backend` 灌迁移、跑 41 条探针，并断言一次登录请求
+  `docker compose up postgres backend` 灌迁移、跑 48 条探针，并断言一次登录请求
   真的落进了 `players` 表。
 - **Nakama 插件**：CI 里 `go build -buildmode=plugin` 编译通过（`nakama-common`
   v1.35.0 已解析并提交 `go.sum`）。
@@ -215,8 +215,8 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 | 阶段 | 目标 | 状态 |
 |---|---|---|
 | M0 ✅ | 垂直切片：单机跑通完整对局闭环 | 完结（4 条验收由 `e2e/TestMatchLifecycle` 断言；spec 0001） |
-| M1 ✅ | 接 Postgres：7/7 域落库、14 张表有写入、等价性测试对齐 | 完结（7 个等价性套件 memory+postgres 各一遍、0 skip；41 条约束断言；spec 0002） |
-| M2 🟡 | 接真实托管分配器 | 主体已完成：Edgegap 真机分配 4s / 释放回读 ~2s（spec 0015）、超时对账、回收重试与指标。缺：计费对账、GameLift/Agones、多实例选主 |
+| M1 ✅ | 接 Postgres：7/7 域落库、14 张表有写入、等价性测试对齐 | 完结（7 个等价性套件 memory+postgres 各一遍、0 skip；48 条约束断言；spec 0002） |
+| M2 ✅ | 接真实托管分配器 | 完成：Edgegap 真机分配 4s / 释放回读 ~2s（spec 0015）、超时对账、回收重试、**分配台账**（spec 0018：`allocated_at`/`released_at` + `tools/allocation-report` + 未确认分配指标）。仅剩厂商账单逐行比对（运维动作，需账单数据）；GameLift/Agones 与多实例选主按触发条件延后 |
 | M3 🟡 | Nakama 落地 | 链路已完成并在 CI 真跑（设备登录 → RPC → 后端；客户端打完整一局，spec 0009/0013）。缺：UE5 客户端实现（引擎侧） |
 | M4 ⬜ | 服务拆分：rank / matchmaking 独立进程，加 gRPC 或消息队列 | 未开始；触发条件：多副本或多区域成为需求（见 `docs/roadmap.md`） |
 | M5 ⬜ | 可观测性与容量：指标落地、压测、SLO | 未开始；指标已出、告警 1 条，缺采集与基线（`docs/roadmap.md` 主线 A） |

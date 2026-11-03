@@ -193,6 +193,10 @@ func TestReconcileOncePublishesTheReleaseBacklog(t *testing.T) {
 		`backend_release_failed_total{service="platform"} 1`,
 		`backend_release_confirmed_total{service="platform"} 0`,
 		`backend_release_oldest_pending_seconds{service="platform"}`,
+		// The ledger's "this can still be billing" number: the release failed, so the
+		// allocation has no confirmed release.
+		`backend_unreleased_allocations{service="platform"} 1`,
+		`backend_unreleased_oldest_seconds{service="platform"}`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics are missing %q:\n%s", want, body)
@@ -211,6 +215,9 @@ func TestReconcileOncePublishesTheReleaseBacklog(t *testing.T) {
 	}
 	if !strings.Contains(body, `backend_release_confirmed_total{service="platform"} 1`) {
 		t.Fatalf("the confirmed counter did not move:\n%s", body)
+	}
+	if !strings.Contains(body, `backend_unreleased_allocations{service="platform"} 0`) {
+		t.Fatalf("the unreleased gauge did not clear:\n%s", body)
 	}
 }
 

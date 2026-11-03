@@ -428,6 +428,23 @@ func (p *Platform) ReconcileOnce(ctx context.Context, now time.Time) error {
 	p.metrics.SetGauge("release_pending_sessions", float64(stats.Pending))
 	p.metrics.SetGauge("release_max_attempts", float64(stats.MaxAttempts))
 	p.metrics.SetGauge("release_oldest_pending_seconds", float64(stats.OldestSeconds))
+
+	// The allocation ledger (spec 0018): an allocation with no confirmed release is the only
+	// thing that can still be billing. release_pending only covers "we tried and failed"; this
+	// covers "we never got as far as confirming it", which is what a crash or a lost queue
+	// leaves behind.
+	unreleased, err := p.Session.Allocations(ctx, session.AllocationQuery{UnreleasedOnly: true}, now)
+	if err != nil {
+		return fmt.Errorf("allocation ledger: %w", err)
+	}
+	var oldestUnreleased int64
+	for _, row := range unreleased {
+		if seconds := int64(row.UnreleasedFor.Seconds()); seconds > oldestUnreleased {
+			oldestUnreleased = seconds
+		}
+	}
+	p.metrics.SetGauge("unreleased_allocations", float64(len(unreleased)))
+	p.metrics.SetGauge("unreleased_oldest_seconds", float64(oldestUnreleased))
 	return nil
 }
 

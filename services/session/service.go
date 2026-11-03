@@ -248,6 +248,10 @@ func (s *Service) create(r *http.Request) (any, error) {
 		sp.Provider = allocation.Provider
 		sp.Address = allocation.Address
 		sp.Port = allocation.Port
+		// The ledger's left edge: without it "how long did this server run" and "is it still
+		// unaccounted for" are both unanswerable.
+		now := s.now().UTC()
+		sp.AllocatedAt = &now
 		return nil
 	})
 	if err != nil {
@@ -266,6 +270,8 @@ func (s *Service) create(r *http.Request) (any, error) {
 			s.log.ErrorContext(r.Context(), "releasing the orphaned allocation failed; scheduling a retry",
 				"session_id", id, "allocation_id", allocation.ID, "err", releaseErr)
 			s.markReleasePending(r.Context(), id, releaseErr)
+		} else {
+			s.markReleased(r.Context(), id)
 		}
 		return nil, apierr.Unavailable("the session closed while its server was starting; the allocation was released").
 			WithDetail("session_id", id).
@@ -435,6 +441,7 @@ func (s *Service) submitResult(r *http.Request) (any, error) {
 			// failures were logged.
 			s.log.InfoContext(r.Context(), "match server released",
 				"session_id", sessionID, "allocation_id", updated.AllocationID)
+			s.markReleased(r.Context(), sessionID)
 		}
 	}
 
@@ -492,6 +499,7 @@ func (s *Service) ExpireStale(ctx context.Context, now time.Time, staleAfter tim
 		} else {
 			s.log.InfoContext(ctx, "expired session's server released",
 				"session_id", stale.ID, "allocation_id", stale.AllocationID)
+			s.markReleased(ctx, stale.ID)
 		}
 		s.log.WarnContext(ctx, "session expired", "session_id", stale.ID, "match_id", stale.MatchID,
 			"provider", stale.Provider, "allocation_id", stale.AllocationID, "stale_state", StateFailed)
@@ -670,10 +678,7 @@ func (s *Service) RetryReleases(ctx context.Context, limit int) (ReleaseRetryRes
 			result.Failed++
 			continue
 		}
-		if _, err := s.store.Update(ctx, sp.ID, func(current *Session) error {
-			current.ReleasePending = false
-			return nil
-		}); err != nil {
+		if err := s.markReleasedErr(ctx, sp.ID); err != nil {
 			s.log.ErrorContext(ctx, "release succeeded but the pending flag would not clear",
 				"session_id", sp.ID, "err", err)
 			continue
@@ -714,4 +719,93 @@ func (s *Service) ReleaseStats(ctx context.Context, now time.Time) (ReleaseStats
 		}
 	}
 	return stats, nil
+}
+
+// ErrNoAllocationLedger is returned when the active store cannot enumerate allocations, so
+// the ledger report is impossible in this deployment.
+var ErrNoAllocationLedger = errors.New("session store cannot enumerate allocations")
+
+// markReleased records that the provider confirmed the instance is gone and clears the retry
+// flag in the same write.
+func (s *Service) markReleased(ctx context.Context, sessionID string) {
+	if err := s.markReleasedErr(ctx, sessionID); err != nil {
+		// The server is already gone; failing to write the timestamp is a bookkeeping miss,
+		// not a reason to fail whatever asked for the release.
+		s.log.ErrorContext(ctx, "could not record the confirmed release", "session_id", sessionID, "err", err)
+	}
+}
+
+func (s *Service) markReleasedErr(ctx context.Context, sessionID string) error {
+	now := s.now().UTC()
+	_, err := s.store.Update(ctx, sessionID, func(sp *Session) error {
+		sp.ReleasedAt = &now
+		sp.ReleasePending = false
+		return nil
+	})
+	return err
+}
+
+// AllocationRow is one line of the allocation ledger, with the numbers an operator or a
+// finance conversation needs already derived.
+type AllocationRow struct {
+	SessionID       string     `json:"session_id"`
+	Provider        string     `json:"provider"`
+	AllocationID    string     `json:"allocation_id"`
+	State           string     `json:"state"`
+	AllocatedAt     time.Time  `json:"allocated_at"`
+	ReleasedAt      *time.Time `json:"released_at,omitempty"`
+	ReleasePending  bool       `json:"release_pending"`
+	ReleaseAttempts int        `json:"release_attempts"`
+	// InstanceSeconds is allocated -> released, or allocated -> now while unreleased.
+	InstanceSeconds int64 `json:"instance_seconds"`
+	// Unreleased means the provider never confirmed the stop. It is the only column that
+	// can still be billing.
+	Unreleased bool `json:"unreleased"`
+	// UnreleasedFor is how long it has been unconfirmed (zero when released).
+	UnreleasedFor time.Duration `json:"-"`
+}
+
+// Allocations returns the allocation ledger: what we asked for, when it came up, and whether
+// anyone confirmed it stopped.
+//
+// This is the half of billing reconciliation that does not need the vendor's invoice: it
+// answers "which instances are unaccounted for, and how long did each run".
+func (s *Service) Allocations(ctx context.Context, q AllocationQuery, now time.Time) ([]AllocationRow, error) {
+	ledger, ok := s.store.(AllocationLedger)
+	if !ok {
+		return nil, ErrNoAllocationLedger
+	}
+	entries, err := ledger.Allocations(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([]AllocationRow, 0, len(entries))
+	for _, session := range entries {
+		if session.AllocatedAt == nil {
+			continue
+		}
+		row := AllocationRow{
+			SessionID:       session.ID,
+			Provider:        session.Provider,
+			AllocationID:    session.AllocationID,
+			State:           session.State,
+			AllocatedAt:     *session.AllocatedAt,
+			ReleasedAt:      session.ReleasedAt,
+			ReleasePending:  session.ReleasePending,
+			ReleaseAttempts: session.ReleaseAttempts,
+		}
+		end := now
+		if session.ReleasedAt != nil {
+			end = *session.ReleasedAt
+		} else {
+			row.Unreleased = true
+			row.UnreleasedFor = now.Sub(*session.AllocatedAt)
+		}
+		if seconds := int64(end.Sub(*session.AllocatedAt).Seconds()); seconds > 0 {
+			row.InstanceSeconds = seconds
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }

@@ -160,7 +160,7 @@ CI 承担的是本机做不到的那部分：
 | 步骤 | 为什么必须在这里 |
 |---|---|
 | `go test -race` | 开发机是 Windows 且没有 C 编译器，`-race` 需要 cgo，跑不了 |
-| `migrate` + `schema probes` | workflow 起 `postgres:16` service，执行 `db/migrations/*.sql`（3 个）与 41 条约束断言 |
+| `migrate` + `schema probes` | workflow 起 `postgres:16` service，执行 `db/migrations/*.sql`（4 个）与 48 条约束断言 |
 | `go test -race`（带库） | 七个"内存 vs SQL"等价性测试在真库上执行，而不是 skip |
 | `assert the database suites did not skip` | skip 与 pass 在汇总行里长得一样，所以 grep `SKIP:` 命中就让构建失败 |
 | `contract drift` | `apigen -check`：手改 `api/openapi/*.json` 会被挡下 |

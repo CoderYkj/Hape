@@ -30,7 +30,7 @@ graph TB
   subgraph HOST["单机主机（生产目标）"]
     NK["Nakama<br/>✅ 真容器登录链路 · spec 0009"]
     BE["backend：platform 单进程<br/>✅ 7 域 · 22 op · spec 0001/0002"]
-    PG[("PostgreSQL 16<br/>✅ 3 迁移 · 41 条断言 · spec 0006")]
+    PG[("PostgreSQL 16<br/>✅ 4 迁移 · 48 条断言 · spec 0006")]
     SM["Prometheus<br/>🟡 规则文件已写，未接入真实实例"]
   end
 
@@ -172,7 +172,7 @@ graph TB
 | progress | `player_progress`、`progress_grants` | ✅ |
 | economy | `wallets`、`ledger_entries` | ✅ |
 | rank | `player_ratings`、`rating_events` | ✅ |
-| 迁移记账 | `schema_migrations` | ✅ 3 个迁移，含 checksum 防篡改 |
+| 迁移记账 | `schema_migrations` | ✅ 4 个迁移，含 checksum 防篡改 |
 
 ---
 
@@ -207,7 +207,7 @@ graph TB
 |---|---|---|
 | `verify` | gofmt / vet / build / `go test -race`（含真库等价性）/ schema 探针 / 契约漂移 | ✅ |
 | `image` | 构建后端镜像、非 root、探活、/metrics | ✅ |
-| `compose` | postgres + backend 起栈、迁移、41 条断言、断言一次登录落库 | ✅ |
+| `compose` | postgres + backend 起栈、迁移、48 条断言、断言一次登录落库 | ✅ |
 | `nakama-module` | Lua 模块加载（真实 Nakama） | ✅ |
 | `nakama` | 登录链路 + **客户端打完整一局**（Nakama 身份 + 容器 DS） | ✅ |
 | `ops` | 迁移幂等/append-only、备份恢复（恢复到新库）、pg 客户端版本护栏 | ✅ |

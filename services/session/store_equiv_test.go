@@ -217,6 +217,86 @@ func TestStoresAgree(t *testing.T) {
 				t.Fatalf("clear release pending: %v", err)
 			}
 
+			// The allocation ledger: both stores must answer "when did it come up / when was it
+			// confirmed gone" the same way, including the unreleased filter.
+			allocated := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
+			released := allocated.Add(90 * time.Second)
+			if _, err := tc.store.Update(ctx, created.ID, func(sp *session.Session) error {
+				sp.AllocatedAt = &allocated
+				sp.ReleasedAt = &released
+				return nil
+			}); err != nil {
+				t.Fatalf("record the allocation timeline: %v", err)
+			}
+			ledger, ok := tc.store.(session.AllocationLedger)
+			if !ok {
+				t.Fatalf("%s store does not implement AllocationLedger", tc.name)
+			}
+			all, err := ledger.Allocations(ctx, session.AllocationQuery{})
+			if err != nil {
+				t.Fatalf("allocations: %v", err)
+			}
+			var ours *session.Session
+			for i := range all {
+				if all[i].ID == created.ID {
+					ours = &all[i]
+				}
+			}
+			if ours == nil {
+				t.Fatalf("the session is missing from %d ledger rows", len(all))
+			}
+			if ours.AllocatedAt == nil || !ours.AllocatedAt.Equal(allocated) {
+				t.Fatalf("allocated_at = %v, want %v", ours.AllocatedAt, allocated)
+			}
+			if ours.ReleasedAt == nil || !ours.ReleasedAt.Equal(released) {
+				t.Fatalf("released_at = %v, want %v", ours.ReleasedAt, released)
+			}
+
+			// Released rows are not in the unreleased view; clearing the timestamp puts them back.
+			if rows, err := ledger.Allocations(ctx, session.AllocationQuery{UnreleasedOnly: true}); err != nil {
+				t.Fatalf("unreleased: %v", err)
+			} else {
+				for _, row := range rows {
+					if row.ID == created.ID {
+						t.Fatal("a released allocation appeared in the unreleased view")
+					}
+				}
+			}
+			if _, err := tc.store.Update(ctx, created.ID, func(sp *session.Session) error {
+				sp.ReleasedAt = nil
+				return nil
+			}); err != nil {
+				t.Fatalf("clear released_at: %v", err)
+			}
+			if rows, err := ledger.Allocations(ctx, session.AllocationQuery{UnreleasedOnly: true}); err != nil {
+				t.Fatalf("unreleased after clearing: %v", err)
+			} else {
+				found := false
+				for _, row := range rows {
+					if row.ID == created.ID {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("an unconfirmed allocation is missing from the unreleased view (%d rows)", len(rows))
+				}
+			}
+			// The lower bound is on the allocation time, and the limit is honoured.
+			if rows, err := ledger.Allocations(ctx, session.AllocationQuery{Since: released.Add(time.Hour)}); err != nil {
+				t.Fatalf("since: %v", err)
+			} else {
+				for _, row := range rows {
+					if row.ID == created.ID {
+						t.Fatal("an allocation older than the lower bound was returned")
+					}
+				}
+			}
+			if rows, err := ledger.Allocations(ctx, session.AllocationQuery{Limit: 1}); err != nil {
+				t.Fatalf("limit: %v", err)
+			} else if len(rows) > 1 {
+				t.Fatalf("limit 1 returned %d rows", len(rows))
+			}
+
 			// A finished session is not stale, however old it looks.
 			expirer, ok := tc.store.(session.Expirer)
 			if !ok {
