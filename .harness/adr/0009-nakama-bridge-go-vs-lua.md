@@ -1,6 +1,11 @@
 # ADR 0009 - Nakama 运行时的桥接方式：Go 插件 vs Lua 模块
 
-- 状态：**accepted**（2026-01-01 拍板：改用 Lua 模块；Go 插件保留为备选，标记未验证）
+> **本 ADR 的决定已被 ADR 0011 推翻。** 当年选 Lua 是因为 Go 插件在宿主机编译后
+> `plugin.Open` 失败（工具链不一致）；而根因是**编译方式**而不是插件机制本身——在官方
+> `nakama-pluginbuilder` 镜像里加 `--trimpath` 构建即可加载。现状：`nakama/modules` 是 Go
+> 插件、Lua 模块已删除。本文保留为"为什么曾经走弯路"的记录，不要照它实施。
+
+- 状态：**superseded by ADR 0011**（原文拍板记录：2026-01-01 改用 Lua 模块；该决定已失效）
 - 日期：2026-01-01
 - 关联：ADR 0001（Nakama 负责身份）、spec 0009（Nakama 联调）
 

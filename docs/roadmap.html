@@ -141,14 +141,14 @@
 </div>
 <p class="cap">箭头 = 先后顺序（不是工期）。虚线框 = 未实现；实线绿 = 已验证；实线黄 = 已实现未验证。</p>
 
-<h3>1.1 执行顺序（未来两周，按"最短板"排序）</h3>
-<p class="lead">排序原则：<strong>代码已经不是最短的那块板</strong>。决定它是"脚手架"还是"系统"的，是第一次真机部署与可量容量基线；唯一会阻塞引擎进度的，是 DS 契约的跨团队评审。</p>
+<h3>1.1 执行顺序（按"最短板"排序）</h3>
+<p class="lead">排序原则：<strong>代码已经不是最短的那块板</strong>。决定它是"脚手架"还是"系统"的，是第一次真机部署与可量容量基线；唯一会阻塞引擎进度的，是 DS 契约的跨团队评审。剩下纯代码能补的项（§2 前四行）都很小，插空档做，不要为它们推迟 1 和 3。</p>
 <table>
 <thead><tr><th>#</th><th>做什么</th><th>为什么现在</th><th>判据</th><th>估算</th></tr></thead>
 <tbody>
 <tr><td>1</td><td><strong>第一次真机部署</strong>：systemd / compose + TLS 反代 + 备份恢复演练 + 重启与磁盘验证</td><td>代码只在 CI 容器与本机跑过，<strong>从未在一台真机上</strong>；这是"脚手架 → 系统"的分界</td><td>重启后数据在；备份恢复到新库后服务能起；TLS 下客户端能连；<code>/metrics</code> 被采集到</td><td>3–5 人日</td></tr>
-<tr><td>2</td><td><strong>Prometheus 接入 + 补齐 4 条告警 + 压测基线</strong></td><td>没有基线数字，容量讨论都是猜；告警只有 1 条</td><td>5 条规则都能被人为触发；给出单机 QPS / 每场对局 P99 / 并发上限</td><td>2–3 人日（压测另计）</td></tr>
-<tr><td>3</td><td><strong>DS 运行时契约评审</strong>（交给 UE5 组）</td><td>唯一会<strong>阻塞引擎进度</strong>的事；越早暴露"他们还缺什么"越好</td><td>引擎组确认 env 表 + 两个上报接口 + <code>result_id</code> 幂等可照做；列出未决项（进入事件、掉线重连、build 参数）</td><td>0.5 人日（一次会）</td></tr>
+<tr><td>2</td><td><s>Prometheus + 告警 + 压测基线</s> → <strong>已做（spec 0019）</strong>；剩下接一台真实例与 soak</td><td>规则与指标的一致性在 CI 里校验过，但<strong>没有真实 Prometheus 采过</strong>，也没有 1 小时以上的持续压测</td><td>7 条规则各被真实流量触发一次；soak 1 小时后 p99 与内存不漂</td><td>1–2 人日</td></tr>
+<tr><td>3</td><td><strong>DS 运行时契约评审</strong>（交给 UE5 组）</td><td>唯一会<strong>阻塞引擎进度</strong>的事；越早暴露"他们还缺什么"越好</td><td>引擎组确认 env 表 + 两个上报接口 + <code>result_id</code> 幂等可照做；6 件待拍板项有结论（<code>docs/ds-runtime-contract.md</code> §6）</td><td>0.5 人日（一次会）</td></tr>
 <tr><td>4</td><td><strong>计费对账 + Edgegap <code>env_vars</code> 复验</strong></td><td>都只差"一次真实操作"，但直接对应钱</td><td>见上文各判据</td><td>1.5–2.5 人日</td></tr>
 <tr><td>5</td><td><strong>三份 ADR</strong>：战报 <code>schema_version</code> / 掉线重连会话模型 / 结算事件化（outbox）</td><td>纯设计、成本低；等 UE5 上线或拆分时再想，就是推翻重来</td><td>三份 ADR 通过评审，写清触发条件与兼容策略</td><td>1–2 人日</td></tr>
 </tbody>
@@ -170,6 +170,10 @@
 <strong>一句话：先让它在真机上跑起来，再让数字说话。</strong></p></div>
 <h2>2. 现在就能做、不被任何外部条件阻塞</h2>
 <div class="chips">
+  <span class="chip"><span class="badge todo">⬜</span> op 级 ACL —— 半天</span>
+  <span class="chip"><span class="badge todo">⬜</span> 越权告警规则 —— 1 小时</span>
+  <span class="chip"><span class="badge todo">⬜</span> 分配失败指标 —— 1 小时</span>
+  <span class="chip"><span class="badge todo">⬜</span> 清扫竞态计数 —— 1 小时</span>
   <span class="chip"><span class="badge todo">⬜</span> Edgegap <code>env_vars</code> 复验 —— 镜像已发布，只需分配一次</span>
   <span class="chip"><span class="badge todo">⬜</span> 计费对账 —— 需厂商账单访问</span>
   <span class="chip"><span class="badge mid">🟡</span> Prometheus 接上 —— 只需一台机器</span>
@@ -204,9 +208,9 @@
 <thead><tr><th>阶段</th><th>目标</th><th>还缺什么</th><th>状态</th></tr></thead>
 <tbody>
 <tr><td>M2 真实托管分配器</td><td>分配 + 回收 + 对账闭环</td><td>✅ 完成（spec 0015 + 0018）。仅剩厂商账单逐行比对；GameLift/Agones 与多实例选主按触发条件延后</td><td><span class="badge ok">✅</span></td></tr>
-<tr><td>M3 Nakama 落地</td><td>账号 / RPC / 客户端链路</td><td>UE5 客户端实现（协议已验证，C++ 未编译）</td><td><span class="badge mid">🟡</span></td></tr>
+<tr><td>M3 Nakama 落地</td><td>账号 / RPC / 客户端链路</td><td>UE5 客户端实现（协议已验证，C++ 未编译）；<strong>生产形态的 Nakama 编排 / 密钥分发</strong>（见 §4）</td><td><span class="badge mid">🟡</span></td></tr>
 <tr><td>M4 服务拆分</td><td>rank / matchmaking 独立进程</td><td>消息总线或 gRPC、mTLS 或短期令牌、sink 改造、选主</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>M5 可观测与容量</td><td>指标、压测、SLO</td><td>指标与 6 条告警 ✅、本机基线（内存 307 场/秒、PG 121 场/秒）🟡；缺 SLO 定义、soak、多机与真实网络</td><td><span class="badge mid">🟡</span></td></tr>
+<tr><td>M5 可观测与容量</td><td>指标、压测、SLO</td><td>指标与 7 条告警 ✅、本机基线（内存 307 场/秒、PG 121 场/秒）🟡；缺 SLO 定义、soak、多机与真实网络</td><td><span class="badge mid">🟡</span></td></tr>
 </tbody>
 </table>
 
@@ -218,15 +222,17 @@
 <tr><td>引擎</td><td>UE5 客户端</td><td><code>docs/ue5-client-model.md</code> 的 C++ 是形状指引，未在引擎里编译</td><td><span class="badge todo">⬜</span></td></tr>
 <tr><td>引擎</td><td>UE5 侧 CI（引擎构建）</td><td>需要引擎与许可，构建很重</td><td><span class="badge todo">⬜</span></td></tr>
 <tr><td>厂商</td><td>GameLift / Agones 适配器</td><td>照 <code>pkg/battlealloc/edgegap.go</code> 结构写，契约测试用假服务</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>对局</td><td>DS 掉线重连</td><td>需要 DS 侧保存每局连接状态</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>对局</td><td>战报 <code>schema_version</code></td><td>加字段，便于以后兼容旧战报</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>对局</td><td>DS 掉线重连</td><td>需要 DS 侧保存每局连接状态（契约 §6 第 3 项：v1 明确不承诺）</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>对局</td><td>战报 <code>schema_version</code></td><td>加字段，便于以后兼容旧战报（契约 §6 第 5 项）</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>对局</td><td><code>ready → in_progress</code> 无人置位</td><td>只有提交战报时隐式跨过；契约 §6 第 1 项的 <code>session.mark_in_progress</code> 没实现，<code>ZombieSession</code> 的 in_progress 分支基本不会触发</td><td><span class="badge todo">⬜</span></td></tr>
 <tr><td>对局</td><td>反作弊（异常战报检测）</td><td>现在是"谁能提交 + 提交什么"的边界，不是行为分析</td><td><span class="badge todo">⬜</span></td></tr>
 <tr><td>平台</td><td>多实例 reconciler 单活选主</td><td>现在多实例会重复 Release（安全但费配额）</td><td><span class="badge todo">⬜</span></td></tr>
 <tr><td>平台</td><td>进程内 sink 换消息总线</td><td>结算扇出跨进程后需要（配合 M4）</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>平台</td><td><strong>生产形态缺 Nakama</strong></td><td><code>docker-compose.prod.yml</code> 只有 postgres + backend；JWT 校验需要外部 Nakama，其生产形态（Nakama 库、<code>BACKEND_JWT_KEY</code> 分发、升级路径）既没有编排也没有 runbook</td><td><span class="badge todo">⬜</span></td></tr>
 <tr><td>运维</td><td>生产数据库运维</td><td>备份/复制/连接池/密码策略；脚本有，真机没跑过</td><td><span class="badge todo">⬜</span></td></tr>
 <tr><td>运维</td><td>生产部署本身</td><td>systemd、TLS 反代、磁盘水位、跨机恢复</td><td><span class="badge todo">⬜</span></td></tr>
 <tr><td>安全</td><td>mTLS / 短期凭证</td><td>scope 解决"能做什么"，不解决"凭证长期有效"</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>安全</td><td>凭证越权告警</td><td>现在只有日志与计数，没有"某凭证被拒 N 次"的告警</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>安全</td><td>玩家 token 吊销 / <code>aud</code></td><td>spec 0011 遗留：封号不能立即生效；token 也不区分客户端类型</td><td><span class="badge todo">⬜</span></td></tr>
 </tbody>
 </table>
 
@@ -242,7 +248,7 @@
 <tr><td>凭证最小权限（默认拒绝 + 覆盖性测试 + 观察期）</td><td>spec 0016</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td>回收指标 + 1 条告警规则</td><td>spec 0015</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td><strong>分配台账</strong>（分配/释放时间线、实例秒数、未确认分配报表与指标）</td><td>spec 0018</td><td><span class="badge ok">✅</span></td></tr>
-<tr><td><strong>观测接线 + 6 条告警 + 压测基线</strong>（含并发 ID 碰撞修复）</td><td>spec 0019</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><strong>观测接线 + 7 条告警 + 压测基线</strong>（含并发 ID 碰撞修复）</td><td>spec 0019</td><td><span class="badge ok">✅</span></td></tr>
 </tbody>
 </table>
 

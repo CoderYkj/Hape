@@ -50,14 +50,23 @@ backend_service_scope_would_deny_total{service}  counter  观察模式下"本会
 - `/healthz` 永远不查下游：数据库慢不该让健康进程被杀。
 - `/readyz` 才是查依赖的地方（v0 无依赖，直接 ready）。
 
-## 需要告警的五件事（小团队最小集）
+## 需要告警的七件事（小团队最小集）
 
-1. 5xx 比例 > 1%（5 分钟窗口）。
-2. `session` 中 `allocating` 超过 3 分钟的数量 > 0（分配卡住）。
-3. `session` 中 `ready/in_progress` 超过 30 分钟的数量 > 0（僵尸对局）。
-4. `economy` 出现 `internal` 错误（钱的操作失败一次都值得看）。
-5. `backend_release_pending_sessions > 0` 持续 15 分钟（战斗服回收没被确认——厂商按秒计费，
-   这是唯一在账单之前能看到的信号）。规则文件：`deploy/prometheus/hape.rules.yml`。
+规则文件：`deploy/prometheus/hape.rules.yml`（每 push 由 `ops` job 用 promtool 校验，并有
+测试盯着"规则引用的指标确实被注册"）。
+
+| # | 告警 | 表达式要点 |
+|---|---|---|
+| 1 | `HighServerErrorRatio` | 5xx 比例 > 1%（5 分钟窗口） |
+| 2 | `SessionsStuckAllocating` | `allocating` 超过 3 分钟的数量 > 0（分配卡住） |
+| 3 | `ZombieSession` | `ready` / `in_progress` 超过 30 分钟的数量 > 0 |
+| 4 | `EconomyInternalError` | `economy.*` 出现 500（钱的操作失败一次都值得看） |
+| 5 | `DedicatedServerReleaseStuck` | `backend_release_pending_sessions > 0` 持续 15 分钟（厂商按秒计费，这是账单之前唯一的信号） |
+| 6 | `UnreleasedAllocation` | `backend_unreleased_allocations > 0` 持续 15 分钟（分配了但没释放，spec 0018 的台账） |
+| 7 | `SettlementLatencyDegraded` | 结算 p99 超过阈值（`backend_request_duration_seconds`） |
+
+**还没有的**（见 `docs/roadmap.md`）：越权告警（`backend_service_scope_denied_total > 0`）、
+竞态计数、Alertmanager 路由与静默。
 
 ## 调试顺序（线上问题）
 

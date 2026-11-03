@@ -5,7 +5,7 @@
 > 这份文档把「现在长什么样」和「还缺什么」画在一起，每个方框、每一行都带状态标注。
 > 代码是唯一事实来源；本文与代码不一致时以代码为准，并请顺手修正本文。
 >
-> 最后更新：2026-11-01（对应 spec 0016：凭证最小权限已落地）
+> 最后更新：2026-11-03（盘点修正：告警 7 条、CI 版本门禁、§7 陈旧行合并）
 
 ## 图例
 
@@ -196,9 +196,9 @@ graph TB
 | JSON 日志（`request_id`/`op`/`status`/`caller`） | ✅ |
 | `/metrics`：请求计数、启动时间 | ✅ |
 | 业务指标：`backend_release_*`（5）、`backend_service_scope_*`（2）、`backend_sessions_*` / `backend_oldest_*`（6）、`backend_unreleased_*`（2） | ✅ spec 0015 / 0016 / 0018 / 0019 |
-| 告警规则：6 条（回收卡住、未确认分配、分配卡住、僵尸对局、5xx 比例、经济 500） | ✅ 规则 + promtool CI + 指标漂移测试（spec 0019） |
-| 告警规则文件（1 条：回收卡住 15m） | 🟡 文件在，未接真实 Prometheus |
-| rules/95 里的另外 4 条告警（5xx>1%、分配卡住、僵尸对局、经济 internal） | 🔜 只是文档 |
+| 告警规则：7 条（回收卡住、未确认分配、分配卡住、僵尸对局、5xx 比例、结算延迟、经济 500） | ✅ 规则 + promtool CI + 指标漂移测试（spec 0019） |
+| 告警规则文件（7 条，`deploy/prometheus/hape.rules.yml`） | 🟡 规则与 promtool 校验在；**没有接真实 Prometheus 实例**，所以"人为触发一次"未做过 |
+| 告警的静默/抑制与值班路由（Alertmanager） | 🔜 部署选择，不属代码 |
 
 ---
 
@@ -209,7 +209,7 @@ graph TB
 | `verify` | gofmt / vet / build / `go test -race`（含真库等价性）/ schema 探针 / 契约漂移 | ✅ |
 | `image` | 构建后端镜像、非 root、探活、/metrics | ✅ |
 | `compose` | postgres + backend 起栈、迁移、48 条断言、断言一次登录落库 | ✅ |
-| `nakama-module` | Go 插件的快速类型检查（真构建在 `nakama` job 的镜像里） | ✅ |
+| `nakama-module` | Go 插件的快速类型检查 + 三方版本一致性（真构建在 `nakama` job 的镜像里，产物级断言也在那里） | ✅ |
 | `nakama` | 登录链路 + **客户端打完整一局**（Nakama 身份 + 容器 DS） | ✅ |
 | `ops` | 迁移幂等/append-only、备份恢复（恢复到新库）、pg 客户端版本护栏 | ✅ |
 | `ds` | DS 镜像、缺 token 拒绝启动、容器/进程各打一局、崩溃重启一次结算、dev 身份完整对局 | ✅ |
