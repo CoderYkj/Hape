@@ -454,10 +454,14 @@ jobs:
       # the drift test in platform/ catches the second.
       - name: the alerting rules are valid PromQL
         run: |
-          docker run --rm -v "$PWD/deploy/prometheus:/etc/prometheus:ro" prom/prometheus:v2.53.0 \
-            promtool check rules /etc/prometheus/hape.rules.yml
-          docker run --rm -v "$PWD/deploy/prometheus:/etc/prometheus:ro" prom/prometheus:v2.53.0 \
-            promtool check config /etc/prometheus/prometheus.yml
+          # The image's entrypoint is /bin/prometheus, so promtool has to be requested
+          # explicitly; without --entrypoint "promtool" becomes an argument to prometheus.
+          docker run --rm --entrypoint promtool \
+            -v "$PWD/deploy/prometheus:/etc/prometheus:ro" prom/prometheus:v2.53.0 \
+            check rules /etc/prometheus/hape.rules.yml
+          docker run --rm --entrypoint promtool \
+            -v "$PWD/deploy/prometheus:/etc/prometheus:ro" prom/prometheus:v2.53.0 \
+            check config /etc/prometheus/prometheus.yml
 
   # The dedicated server image, and the runtime contract it implements. This is the
   # only place the per-session credential is proven to arrive *inside an instance*:
