@@ -209,7 +209,7 @@ graph TB
 | `verify` | gofmt / vet / build / `go test -race`（含真库等价性）/ schema 探针 / 契约漂移 | ✅ |
 | `image` | 构建后端镜像、非 root、探活、/metrics | ✅ |
 | `compose` | postgres + backend 起栈、迁移、48 条断言、断言一次登录落库 | ✅ |
-| `nakama-module` | Lua 模块加载（真实 Nakama） | ✅ |
+| `nakama-module` | Go 插件的快速类型检查（真构建在 `nakama` job 的镜像里） | ✅ |
 | `nakama` | 登录链路 + **客户端打完整一局**（Nakama 身份 + 容器 DS） | ✅ |
 | `ops` | 迁移幂等/append-only、备份恢复（恢复到新库）、pg 客户端版本护栏 | ✅ |
 | `ds` | DS 镜像、缺 token 拒绝启动、容器/进程各打一局、崩溃重启一次结算、dev 身份完整对局 | ✅ |

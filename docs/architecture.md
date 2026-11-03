@@ -144,7 +144,7 @@ sequenceDiagram
 | M0 | 垂直切片：一场对局跑通全链路（内存存储 + local allocator） | ✅ 完成 | spec 0001 |
 | M1 | Postgres 持久化：7/7 域落库、单事务结算、迁移 + 约束探针 | ✅ 完成 | spec 0002 / 0005、ADR 0006 / 0007 |
 | M2 | 真实托管分配器 + per-allocation token + 厂商侧确认回收 | 进行中：Edgegap 适配器真机跑通（分配 3s、释放即 TERMINATED）；服务 token → 每场 token 的双凭证已完成（spec 0008）；剩厂商侧确认回收与自有 DS 镜像 | spec 0007 / 0008、`docs/edgegap-setup.md` |
-| M3 | Nakama 落地：真实登录 → `account.login` | 进行中：桥接改为 **Lua 模块**（ADR 0009），CI 在真 Nakama 上跑通「设备登录 → RPC → 后端账号 → 后端读取」 | ADR 0009、`nakama/runtime/login.lua` |
+| M3 | Nakama 落地：真实登录 → `account.login` | 进行中：桥接是 **Go 插件**（ADR 0011 取代 0009），CI 构建插件镜像并在真 Nakama 上跑通「设备登录 → RPC → 后端账号 → 后端读取」 | ADR 0011、`nakama/modules`、`nakama/Dockerfile` |
 | M4 | 按热点拆服务；结算扇出改 outbox（**强制**，单事务在拆分后不成立） | 未开始（前置 M2/M3） | ADR 0005、ADR 0007 |
 | M5 | 可观测性与容量：指标落地、压测、SLO、僵尸会话告警 | 未开始（前置有真实流量） | 95 文档 |
 
@@ -167,8 +167,8 @@ CI 承担的是本机做不到的那部分：
 | `assert the database suites did not skip` | skip 与 pass 在汇总行里长得一样，所以 grep `SKIP:` 命中就让构建失败 |
 | `contract drift` | `apigen -check`：手改 `api/openapi/*.json` 会被挡下 |
 | `image` / `compose` 两个 job | 本机没有 Docker；CI 构建镜像、以非 root 跑起来探活，再拉起 compose（含 Postgres）、跑迁移与探针、并断言一次请求真的落了库 |
-| `nakama-module` job | **备选路径**：Go 插件（ADR 0009 弃用）是 `package main` 但没有 `func main`，普通 `go build` 检查不了，所以用 `-buildmode=plugin` 保证它不会烂掉 |
-| `nakama` job | **现役路径**：起真实 Nakama + **Lua 模块** + 后端，跑「设备登录 → RPC `login` → 后端账号 → 后端读取」，并断言 players 表落了行 |
+| `nakama-module` job | 插件的**快速编译检查**（`go vet` + `-buildmode=plugin`）：这里的产物**不用于部署**；真构建在 `nakama` job 的镜像里，用官方 pluginbuilder 对齐工具链 |
+| `nakama` job | **唯一可信的桥接验证**：构建插件镜像 → 起真实 Nakama + 后端 → 断言 `gamemodule loaded` → 跑「设备登录 → RPC `login` → 后端账号 → 后端读取」→ 断言 players 表落了行 |
 
 本机那套（Windows、免安装 Postgres 16.4、端口 55432）见 `docs/postgres-local.md`。
 两套环境不同，**互不代表**：本机绿不等于 CI 绿，反之亦然。

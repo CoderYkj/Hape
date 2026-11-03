@@ -92,9 +92,10 @@ dev 模式下 token 必须是 `dev-player-<player_id>` 或 `dev-service`；
 
 ## 6. 接入真实 Nakama（M3）
 
-1. 起整套：`docker compose -f deploy/docker-compose.yml up -d postgres backend nakama`。
-   Nakama 的桥接是 **Lua 模块**（`nakama/runtime/login.lua`，compose 里直接挂载），
-   不需要编译 `.so`；Go 插件（`nakama/modules`）是 ADR 0009 弃用后的备选路径。
+1. 起整套（**必须带 `--build`**）：`docker compose -f deploy/docker-compose.yml up -d --build postgres backend nakama`。
+   Nakama 的桥接是 **Go 插件**（`nakama/modules`），由 `nakama/Dockerfile` 在官方
+   `nakama-pluginbuilder` 镜像里编进 Nakama 镜像（同 tag + `--trimpath`，ADR 0011）。
+   **不要在宿主机上编 `.so` 再挂进去**——工具链不同会让 `plugin.Open` 失败，Nakama 直接起不来。
 2. 后端用真实凭证集：`BACKEND_DEV_AUTH=false` +
    `BACKEND_SERVICE_CREDENTIALS=nakama=<secret>:account`。Nakama 容器用同名变量
    `BACKEND_SERVICE_TOKEN` 承载这条 secret；scope 必须覆盖它要调的 service，否则 403。

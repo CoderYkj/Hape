@@ -74,7 +74,14 @@ services:
     restart: unless-stopped
 
   nakama:
-    image: heroiclabs/nakama:${NAKAMA_VERSION:-3.22.0}
+    # The Go runtime plugin is compiled into this image by nakama/Dockerfile (official
+    # pluginbuilder, same release tag, --trimpath) - see ADR 0011. Building here rather than
+    # on the host is what makes plugin.Open succeed.
+    build:
+      context: ../nakama
+      args:
+        NAKAMA_VERSION: ${NAKAMA_VERSION:-3.22.0}
+    image: hape-nakama:${NAKAMA_VERSION:-3.22.0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -98,13 +105,6 @@ services:
       - "127.0.0.1:7350:7350"   # client API
       - "127.0.0.1:7351:7351"   # console (http://127.0.0.1:7351)
       - "127.0.0.1:7349:7349"   # grpc
-    volumes:
-      # Lua runtime module (`login.lua`: Nakama session -> backend player), loaded
-      # directly - no build step, no ABI to match
-      # (ADR 0009). The Go plugin under nakama/modules still compiles and is kept as
-      # the alternative path, but it is not mounted: a .so built anywhere other than
-      # Nakama's own build container fails plugin.Open on package hashes.
-      - ../nakama/runtime:/nakama/data/modules:ro
 
 volumes:
   pgdata:

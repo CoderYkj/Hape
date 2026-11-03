@@ -274,7 +274,9 @@ jobs:
             exit 0
           fi
           echo "::error title=runtime module missing::the Lua module did not register rpc=login"
-          grep -iE "error|fatal|lua|module" /tmp/nakama.log | tail -30 || true
+          # A Go plugin that fails plugin.Open mentions "plugin" and "module"; the Lua-era
+          # greps did not, so an ABI failure used to hide in the tail of the log.
+          grep -iE "error|fatal|plugin|\.so|module" /tmp/nakama.log | tail -40 || true
           exit 1
 
       - name: login through the module

@@ -132,7 +132,7 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 - **没有生产数据库**：schema 只在本地实例与 CI 的临时容器上跑过，没有备份、
   复制、连接池调优与密码策略（`docs/postgres-local.md` 的"未验证/未做"一节）
 - `docs/ue5-ds-integration.md` 里的 C++ 片段：未在 UE5 工程里编译
-- Nakama 桥接（Lua 模块）：**CI 在真 Nakama 上验证过**——设备登录 → RPC `login` →
+- Nakama 桥接（**Go 插件**，ADR 0011）：**CI 在真 Nakama 上验证过**——设备登录 → RPC `login` →
   后端 `account.login` → 后端读取，并在 `players` 表里断言到对应行（spec 0009）。
 - **客户端对局闭环**（spec 0013）：`clients/minimal` 从"入队"一路走到"连上战斗服"——
   按票据上的 `match_id` 用 `GET /v1/session/sessions/by-match/{match_id}` 找到地址，
@@ -157,9 +157,10 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 - **镜像与编排**：CI 里 `docker build` 后以非 root（uid 10001）运行并探活；
   `docker compose up postgres backend` 灌迁移、跑 48 条探针，并断言一次登录请求
   真的落进了 `players` 表。
-- **Nakama 桥接**：现役路径是 **Lua 模块**（`nakama/runtime/login.lua`），CI 的 `nakama`
-  job 在真实 Nakama 容器里加载它并跑通整条登录链路。`nakama/modules` 的 Go 插件是
-  ADR 0009 弃用后的**备选**，仍由 `nakama-module` job 编译，保证它不会烂掉。
+- **Nakama 桥接**：现役路径是 **Go 插件**（`nakama/modules`，ADR 0011 取代了 ADR 0009 的
+  Lua 方案）。插件由 `nakama/Dockerfile` 用官方 `nakama-pluginbuilder` 镜像、同 tag、
+  `--trimpath` 编进 Nakama 镜像——这是 `plugin.Open` 能成功的前提。CI 的 `nakama` job
+  构建镜像、起容器、断言 `gamemodule loaded` 并跑通整条登录链路。Lua 模块已删除。
 
 不要因为某文件"看起来完整"就假设它跑通了——以这一节为准。
 
