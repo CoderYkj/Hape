@@ -11,7 +11,7 @@
 
 | 平面 | 技术 | 负责 | 不负责 |
 |---|---|---|---|
-| 社交/账号平面 | **Nakama**（Go 插件） | 登录鉴权、好友、公会、聊天、直连匹配、云存档入口 | 任何需要审计的经济与进度逻辑 |
+| 社交/账号平面 | **Nakama**（Lua 桥接；Go 插件为弃用的备选） | 登录鉴权、好友、公会、聊天、直连匹配、云存档入口 | 任何需要审计的经济与进度逻辑 |
 | 领域平面 | **Go 微服务**（本仓库主要代码） | 账号映射、队伍、匹配、会话、进度、经济、排行 | 帧同步、物理、战斗判定 |
 | 战斗平面 | **UE5 Dedicated Server**（早期托管：GameLift / Edgegap / Agones） | 局内唯一权威：命中、伤害、胜负、掉落 | 局外资产、跨局状态、付款 |
 
@@ -103,7 +103,8 @@ tools/fakeds/          假 Dedicated Server，跑通整条对局链（也可当"
 ds/                    参考 Dedicated Server：环境契约 + 幂等结算（spec 0012）
 e2e/                   端到端闭环测试（HTTP 真实请求）
 api/openapi/*.json     生成产物，勿手改
-nakama/modules/        Nakama Go 插件（独立 go module，需联网构建）
+nakama/runtime/        现役桥接：Lua 模块（登录 RPC；CI 的 nakama job 真跑）
+nakama/modules/        Go 插件（ADR 0009 弃用，仅作备选；独立 go module）
 db/migrations/         目标 SQL schema（v0 未启用）
 deploy/                本地 docker-compose：postgres + backend + nakama（未验证）
 Dockerfile             多阶段构建 + 非 root 运行时（未验证，见 docs/deploy.md）

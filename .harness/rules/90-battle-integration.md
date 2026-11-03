@@ -10,7 +10,7 @@
 | 比赛实例是否存在、地址、端口 | **Allocator**（托管厂商） | `pkg/battlealloc` | 否 |
 | 谁和谁匹配 | **matchmaking 服务** | `services/matchmaking` | 只能决定自己排不排 |
 | 比赛结果如何进入经济/进度/排行 | **session 服务** | `services/session` + `platform/sink.go` | 否 |
-| 玩家身份从哪来 | **Nakama** | `nakama/modules` → `account.login` | 提供凭据，不决定身份 |
+| 玩家身份从哪来 | **Nakama** | `nakama/runtime/login.lua` → `account.login` | 提供凭据，不决定身份 |
 | 队伍/成员 | **team 服务**（社交类留在 Nakama） | `services/team` | 可以邀请，不能改人数上限 |
 | 余额、价格、掉落 | **economy 服务** | `services/economy` | 否 |
 

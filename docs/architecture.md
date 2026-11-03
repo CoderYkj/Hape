@@ -167,8 +167,8 @@ CI 承担的是本机做不到的那部分：
 | `assert the database suites did not skip` | skip 与 pass 在汇总行里长得一样，所以 grep `SKIP:` 命中就让构建失败 |
 | `contract drift` | `apigen -check`：手改 `api/openapi/*.json` 会被挡下 |
 | `image` / `compose` 两个 job | 本机没有 Docker；CI 构建镜像、以非 root 跑起来探活，再拉起 compose（含 Postgres）、跑迁移与探针、并断言一次请求真的落了库 |
-| `nakama-module` job | 插件是 `package main` 但没有 `func main`，普通 `go build` 检查不了；CI 用 `-buildmode=plugin` 证明它仍能被 Nakama 加载 |
-| `nakama` job | 起真实 Nakama + 插件 + 后端，跑一遍「设备登录 → RPC `login` → 后端账号 → 后端读取」，并断言 players 表落了行。M3 的唯一可信验证点 |
+| `nakama-module` job | **备选路径**：Go 插件（ADR 0009 弃用）是 `package main` 但没有 `func main`，普通 `go build` 检查不了，所以用 `-buildmode=plugin` 保证它不会烂掉 |
+| `nakama` job | **现役路径**：起真实 Nakama + **Lua 模块** + 后端，跑「设备登录 → RPC `login` → 后端账号 → 后端读取」，并断言 players 表落了行 |
 
 本机那套（Windows、免安装 Postgres 16.4、端口 55432）见 `docs/postgres-local.md`。
 两套环境不同，**互不代表**：本机绿不等于 CI 绿，反之亦然。

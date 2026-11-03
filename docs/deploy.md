@@ -86,13 +86,10 @@ BACKEND_BASE_URL=http://backend:8080 \
 | 5432 | Postgres |
 | 7350 / 7351 / 7349 | Nakama client API / console / gRPC |
 
-**注意**：`backend` 服务今天**没有** `depends_on: postgres`，也**没有**设
-`BACKEND_DATABASE_URL`——虽然后端七个域都支持 Postgres，但这套 compose 里还没有
-一个给后端用的数据库（现成的 `postgres` 服务只建了 `nakama` 库）。
-
-补法是加一个 `/docker-entrypoint-initdb.d/*.sql` 建 `gamebackend` 库与角色，然后
-`backend` 加 `depends_on: postgres` 和 `BACKEND_DATABASE_URL=postgres://...@postgres:5432/gamebackend`。
-这一步没有 Docker 无法验证，所以列在待补清单里，而不是写成已经配好。
+**这套 compose 已经接好数据库**：`deploy/postgres-init/01-backend.sql` 在首次启动时建
+`gamebackend` 库与角色，`backend` 通过 `depends_on: postgres` + `BACKEND_DATABASE_URL`
+连上去（七个域全部走 Postgres，ADR 0006）。CI 的 `compose` job 证明它真的能用：灌迁移、
+跑 48 条断言，并断言一次登录请求**落进了 `players` 表**。
 
 ## 5. 环境变量矩阵
 

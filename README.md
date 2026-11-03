@@ -114,7 +114,8 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 - `gofmt -l .` 无输出
 - `go run ./tools/apigen -check` 无漂移
 - `platform` + `fakeds` 完整对局闭环跑通（`OK: full match loop completed`）
-- `db/migrations/0001_init.sql` 在真实 Postgres 16.4 上执行成功（13 张表）；
+- `db/migrations/0001_init.sql` 在真实 Postgres 16.4 上执行成功（13 张表；`0002` 再加
+  `progress_grants` 共 14 张领域表，连同 `schema_migrations` 一共 15 张物理表）；
   `db/probes/*.probe.sql` **48 条约束断言全 PASS**（0001 的 35 条 + 0003 的 6 条 + 0004 的 7 条）
   （幂等键、余额非负、状态机守卫、一会话一战报、一人一队都被数据库拒绝）
 - **七个域全部落库**：`platform` 连真库跑完 `fakeds` 全链路，14 张表全部出现对应行
@@ -127,7 +128,7 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 - **从未部署到任何服务器**：生产形态（单机 compose + systemd）、发布（ghcr + sha tag）、
   迁移脚本、备份/恢复脚本都已就位并由 CI 验证（`ops` / `release` job），但
   **没有真机器跑过**：systemd 启停、TLS 反代、磁盘水位、跨机器恢复都未验证
-- Nakama 插件只验到"能编译成 `.so`"：**没有真的加载进 Nakama 跑过一次登录**
+
 - **没有生产数据库**：schema 只在本地实例与 CI 的临时容器上跑过，没有备份、
   复制、连接池调优与密码策略（`docs/postgres-local.md` 的"未验证/未做"一节）
 - `docs/ue5-ds-integration.md` 里的 C++ 片段：未在 UE5 工程里编译
@@ -156,8 +157,9 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 - **镜像与编排**：CI 里 `docker build` 后以非 root（uid 10001）运行并探活；
   `docker compose up postgres backend` 灌迁移、跑 48 条探针，并断言一次登录请求
   真的落进了 `players` 表。
-- **Nakama 插件**：CI 里 `go build -buildmode=plugin` 编译通过（`nakama-common`
-  v1.35.0 已解析并提交 `go.sum`）。
+- **Nakama 桥接**：现役路径是 **Lua 模块**（`nakama/runtime/login.lua`），CI 的 `nakama`
+  job 在真实 Nakama 容器里加载它并跑通整条登录链路。`nakama/modules` 的 Go 插件是
+  ADR 0009 弃用后的**备选**，仍由 `nakama-module` job 编译，保证它不会烂掉。
 
 不要因为某文件"看起来完整"就假设它跑通了——以这一节为准。
 
@@ -196,7 +198,7 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
 | ~~服务间认证是共享静态 token，换不了~~ | — | **已修复轮换**（spec 0014）：`BACKEND_SERVICE_CREDENTIALS` 支持多条带名字的凭证并行，四步零停机轮换；认证结果带调用方名字并进请求日志（`caller=`），"还有谁在用旧凭证"因此可回答 |
 | ~~一条凭证仍能调用所有 service 接口~~ | — | **已修复**（spec 0016）：凭证可声明可调 service（`name=token:account`），越权返回 403；默认拒绝、拼错 scope 启动失败、观察模式（`BACKEND_SERVICE_SCOPE_ENFORCE=false`）先验证再强制；一条覆盖性测试防止示例 env 漏配。余下是 mTLS/短期令牌（M4） |
 | 没有生产数据库运维 | 无备份、复制、连接池调优、密码策略 | 运维上车时补，见 `docs/postgres-local.md` 的"未验证/未做" |
-| `nakama/modules` 从未编译通过 | 登录链路在生产里跑不起来 | CI 里加了编译步骤（见第 3 项），失败就修 |
+
 
 **`account.login` 的信任问题：已决定延后**（2026-01-01）。理由：它只在"后端直接暴露给
 不可信客户端"时才可被利用；当前部署形态是 Nakama 插件用服务凭证调它。重开条件（满足任一

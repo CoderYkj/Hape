@@ -92,12 +92,14 @@ dev 模式下 token 必须是 `dev-player-<player_id>` 或 `dev-service`；
 
 ## 6. 接入真实 Nakama（M3）
 
-1. 起 Postgres + Nakama（见 `deploy/docker-compose.yml`，未验证）。
-2. 把 `nakama/modules/` 编译成 `.so` 放进 Nakama 的 `data/modules/`（需要联网拉依赖）。
-3. `BACKEND_DEV_AUTH=false` + 真实凭证集：`BACKEND_SERVICE_CREDENTIALS=nakama=<secret>:account`
-   （Nakama 插件用同名变量 `BACKEND_SERVICE_TOKEN` 承载这条 secret；scope 必须覆盖它要调的
-   service，否则 403）。
-4. Nakama 的登录钩子把外部身份转发到 `POST /v1/account/sessions`。
+1. 起整套：`docker compose -f deploy/docker-compose.yml up -d postgres backend nakama`。
+   Nakama 的桥接是 **Lua 模块**（`nakama/runtime/login.lua`，compose 里直接挂载），
+   不需要编译 `.so`；Go 插件（`nakama/modules`）是 ADR 0009 弃用后的备选路径。
+2. 后端用真实凭证集：`BACKEND_DEV_AUTH=false` +
+   `BACKEND_SERVICE_CREDENTIALS=nakama=<secret>:account`。Nakama 容器用同名变量
+   `BACKEND_SERVICE_TOKEN` 承载这条 secret；scope 必须覆盖它要调的 service，否则 403。
+3. 验证：CI 的 `nakama` job 就是这条链路的完整脚本——设备登录 → RPC `login` → 后端账号
+   → 断言 `players` 表有对应行。本机可以照 `tools/nakama-smoke` 跑一遍。
 
 ## 7. 接入真实托管战斗服（M2）
 

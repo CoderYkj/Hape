@@ -68,7 +68,8 @@ scripts\pg-local.cmd -Action probe     # 跑 db/probes/*.probe.sql
 
 ## 已验证（本机实跑）
 
-- `db/migrations/0001_init.sql` + `0002_progress_grants.sql` 应用成功，15 张表
+- `db/migrations/` 全部应用成功：14 张领域表 + 1 张 `schema_migrations`（0001 建 13 张，
+  0002 加 `progress_grants`，0003/0004 只加列与索引）
 - `db/probes/0001_constraints.probe.sql`：**35 PASS / 0 FAIL**
 - 重复 `migrate` 正确跳过（幂等）
 - 修掉的真实缺陷：`matchmaking_tickets.status` 缺 `DEFAULT 'waiting'`，
