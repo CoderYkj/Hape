@@ -86,6 +86,8 @@
 | 越权告警 | `backend_service_scope_denied_total` 已经在报数，缺一条 `> 0 持续 10m` 的规则 | 人为越权能触发告警 | ⬜ 1 小时 |
 | 分配失败指标 | `docs/slo.md` 第 4 条 SLI 没数据可算（`backend_allocations_failed_total` 不存在） | Allocate 失败时计数 +1，SLO 能算成功率 | ⬜ 1 小时 |
 | 清扫竞态计数 | 竞态只在 WARN 日志里（spec 0017 遗留），无法回答"多久发生一次" | 一个 counter，压测时能读出次数 | ⬜ 1 小时 |
+| 入站限流 | `apierr.TooManyRequests` 已定义，但**没有任何 handler 返回它**；拿到玩家 token 就能反复 `matchmaking.enqueue` | 每凭证/玩家有速率上限，超出返回 429 | ⬜ 半天 |
+| 读接口分页 | `economy.get_ledger` 的查询是 `ORDER BY id` 无 LIMIT，玩家历史越长返回越大 | ledger 支持 `limit`+游标，默认有上限 | ⬜ 2–3 小时 |
 | Edgegap `env_vars` 复验 | 机制在本地/CI 容器验过；厂商侧注入未验，而镜像已经发布（`:<sha>-ds`） | container logs 出现 `runtime_token=present(len=N)` | ⬜ |
 | 厂商账单逐行比对 | 我方台账已完成（分配/释放时间线 + 实例秒数，spec 0018）；剩下的是拿厂商账单核对 | 逐行对齐无差异 | ⬜ 需账单访问 |
 
