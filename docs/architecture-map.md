@@ -200,7 +200,8 @@ graph TB
 | 业务指标：`backend_release_*`（5）、`backend_service_scope_*`（2）、`backend_sessions_*` / `backend_oldest_*`（6）、`backend_unreleased_*`（2） | ✅ spec 0015 / 0016 / 0018 / 0019 |
 | 告警规则：8 条（回收卡住、未确认分配、分配卡住、僵尸对局、5xx 比例、结算延迟、越权调用、经济 500） | ✅ 规则 + promtool CI + 指标漂移测试（spec 0019） |
 | 告警规则文件（8 条，`deploy/prometheus/hape.rules.yml`） | 🟡 规则与 promtool 校验在；**没有接真实 Prometheus 实例**，所以"人为触发一次"未做过 |
-| 告警的静默/抑制与值班路由（Alertmanager） | 🔜 部署选择，不属代码 |
+| 告警路由（Alertmanager，分组/severity 分级/`amtool` 校验） | 🟡 配置 + CI 校验在；接收人未接、抑制为空、没有真实实例 |
+| 值班轮转与静默策略 | 🔜 需要发布标记与真实接收人 |
 
 ---
 

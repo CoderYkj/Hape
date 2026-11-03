@@ -102,6 +102,12 @@ jobs:
             exit 1
           }
 
+      # The gates that used to be a paragraph in docs/README.md: links resolve, the index
+      # counts match the record directories, and roadmap.md/roadmap.html agree on the
+      # sections that churn. All three failed silently at least once.
+      - name: docs links, index counts and mirrors agree
+        run: sh scripts/docs-check.sh
+
   # The Dockerfile and the compose stack are not runnable on a developer machine
   # without Docker, so they are exercised here instead: build the image, run it,
   # probe it; then bring up compose with a real database, apply the migrations and
@@ -110,6 +116,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
 
       - name: build image
         run: docker build -t hape:ci .
@@ -412,14 +419,13 @@ jobs:
           fi
           MIGRATIONS_DIR=/tmp/migs sh scripts/db-migrate.sh 2>&1 | grep -q 'append-only'
 
-      # spec 0020 item 7. The archive must move what it claims (old, finished, release
-      # confirmed), leave what it must not (young, or still awaiting release), and be
-      # idempotent - a re-run that moves the same rows twice would corrupt the count.
-      - name: the archive moves only old settled sessions
+      # spec 0020 item 7 (+ the follow-up: failed sessions and the restore path). The archive
+      # must move what it claims, leave what the reconciler may still need, and be reversible.
+      - name: the archive moves only settled sessions, and can put them back
         run: |
           psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
-          INSERT INTO sessions (id, match_id, state, result_id, allocation_id, provider, address, port,
-                                created_at, finished_at, allocated_at, released_at)
+          INSERT INTO sessions (id, match_id, state, result_id, allocation_id, provider, address,
+                                port, created_at, finished_at, allocated_at, released_at)
           VALUES ('s_old','m_old','finished','r_old','a_old','fake','10.0.0.1',7777,
                   timestamptz '2020-01-01Z', timestamptz '2020-01-01Z',
                   timestamptz '2020-01-01Z', timestamptz '2020-01-01Z'),
@@ -435,6 +441,17 @@ jobs:
             VALUES ('r_old','s_old',300), ('r_new','s_new',300), ('r_pending','s_pending',300);
           INSERT INTO match_player_results (result_id, player_id, won, score, kills, deaths, damage)
             VALUES ('r_old','p1',true,10,1,0,100), ('r_old','p2',false,5,0,1,50);
+
+          -- A failed allocation is still history: released ones and never-allocated ones are
+          -- archivable. One with release_pending is NOT (the reconciler still retries it).
+          INSERT INTO sessions (id, match_id, state, allocation_id, provider, created_at,
+                                allocated_at, released_at, release_pending, release_attempts)
+          VALUES ('s_fdl','m_fdl','failed','a_fdl','fake', timestamptz '2020-01-02Z',
+                  timestamptz '2020-01-02Z', timestamptz '2020-01-02Z', false, 0),
+                 ('s_fpend','m_fpend','failed','a_fpend','fake', timestamptz '2020-01-02Z',
+                  timestamptz '2020-01-02Z', NULL, true, 3);
+          INSERT INTO sessions (id, match_id, state, created_at)
+          VALUES ('s_fnever','m_fnever','failed', timestamptz '2020-01-02Z');
           SQL
 
           # A cutoff is required: the script refuses to guess "how old is old".
@@ -450,19 +467,38 @@ jobs:
 
           ARCHIVE_CONFIRM=yes ARCHIVE_BEFORE=2026-01-01 sh scripts/db-archive.sh
 
-          # Moved: the old, settled, release-confirmed session and its children.
+          # Moved: the old settled session (with children) and both archivable failures.
           test "$(psql -tAc "SELECT count(*) FROM sessions_archive WHERE id='s_old'" "$DATABASE_URL")" = "1"
           test "$(psql -tAc "SELECT count(*) FROM sessions WHERE id='s_old'" "$DATABASE_URL")" = "0"
           test "$(psql -tAc "SELECT count(*) FROM session_players_archive WHERE session_id='s_old'" "$DATABASE_URL")" = "2"
           test "$(psql -tAc "SELECT count(*) FROM match_player_results_archive WHERE result_id='r_old'" "$DATABASE_URL")" = "2"
-          # Left alone: too young, and finished-but-never-confirmed-released.
+          test "$(psql -tAc "SELECT count(*) FROM sessions_archive WHERE id IN ('s_fdl','s_fnever')" "$DATABASE_URL")" = "2"
+
+          # Left alone: too young, release never confirmed, and release still being retried.
           test "$(psql -tAc "SELECT count(*) FROM sessions WHERE id='s_new'" "$DATABASE_URL")" = "1"
           test "$(psql -tAc "SELECT count(*) FROM sessions WHERE id='s_pending'" "$DATABASE_URL")" = "1"
+          test "$(psql -tAc "SELECT count(*) FROM sessions WHERE id='s_fpend'" "$DATABASE_URL")" = "1"
 
           # Idempotent: nothing left to move.
           ARCHIVE_CONFIRM=yes ARCHIVE_BEFORE=2026-01-01 sh scripts/db-archive.sh > /tmp/archive-rerun.txt
           grep -Eq '^\s+0 \|\s+0 \|\s+0 \|\s+0' /tmp/archive-rerun.txt
 
+          # Restore is the undo path: dry run first, then the real move, then the guard.
+          RESTORE_SESSION_IDS=s_fdl sh scripts/db-archive-restore.sh > /tmp/restore-dry.txt
+          grep -q 'dry run' /tmp/restore-dry.txt
+          test "$(psql -tAc "SELECT count(*) FROM sessions_archive WHERE id='s_fdl'" "$DATABASE_URL")" = "1"
+
+          ARCHIVE_RESTORE_CONFIRM=yes RESTORE_SESSION_IDS=s_fdl sh scripts/db-archive-restore.sh
+          test "$(psql -tAc "SELECT count(*) FROM sessions WHERE id='s_fdl'" "$DATABASE_URL")" = "1"
+          test "$(psql -tAc "SELECT count(*) FROM sessions_archive WHERE id='s_fdl'" "$DATABASE_URL")" = "0"
+
+          # Restoring an id that is already live would delete the archive copy while keeping
+          # the live row - refuse instead of guessing which version is real.
+          if ARCHIVE_RESTORE_CONFIRM=yes RESTORE_SESSION_IDS=s_fdl sh scripts/db-archive-restore.sh 2>/tmp/restore-again.txt; then
+            echo "::error title=restore guard::restoring an already-live session was accepted"
+            exit 1
+          fi
+          grep -q 'refusing to restore' /tmp/restore-again.txt
       - name: a backup survives losing the data
         run: |
           psql -v ON_ERROR_STOP=1 -c \
@@ -535,6 +571,18 @@ jobs:
           docker run --rm --entrypoint promtool \
             -v "$PWD/deploy/prometheus:/etc/prometheus:ro" prom/prometheus:v2.53.0 \
             check config /etc/prometheus/prometheus.yml
+
+      # A rules file that fires into nothing is worse than no rules: it looks like coverage.
+      # amtool parses the routing tree, the matchers and the receivers, so a typo in a
+      # matcher (or a recever nobody defined) fails here instead of silently dropping pages.
+      - name: the alert routing is valid
+        run: |
+          docker run --rm --entrypoint amtool \
+            -v "$PWD/deploy/prometheus:/am:ro" prom/alertmanager:v0.27.0 \
+            check-config /am/alertmanager.yml
+          # What this can and cannot prove: check-config validates the file (routing tree,
+          # matchers, receiver references). It cannot prove delivery - the receivers carry no
+          # integration on purpose, and the comment in the file says where to add one.
 
   # The dedicated server image, and the runtime contract it implements. This is the
   # only place the per-session credential is proven to arrive *inside an instance*:

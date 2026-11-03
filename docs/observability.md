@@ -107,6 +107,31 @@ curl -s http://127.0.0.1:9090/api/v1/rules | jq '.data.groups[].rules[].name'
 | `ServiceScopeDenied` | 某凭证在 10 分钟内出现越权（强制）或 would-deny（观察） | warning |
 | `EconomyInternalError` | 钱包/账本操作出现 500 | critical |
 
+### 3.1 告警送到哪：`alertmanager.yml`
+
+规则触发后要有人接。`deploy/prometheus/alertmanager.yml` 是最小路由：
+
+- **分组**：`alertname` + `service`，一次通知对应一条告警的一个服务，而不是每台实例一条；
+- **critical 更快**：`group_wait: 10s`、`repeat_interval: 1h`（钱与结算的事，钟表比队列重要）；
+- **warning**：`group_wait: 30s`、`repeat_interval: 4h`；
+- **receivers 故意不带 integration**：这个文件定义的是拓扑与路由策略，不是投递。真接人时
+  在注释指出的位置加 `webhook_configs`/`slack_configs`，然后 CI 的 `amtool check-config`
+  会继续保证形状合法。
+- **`inhibit_rules` 为空是刻意的**：常见的"发布期抑制 5xx"需要发布标记，没人发这个事件；
+  写了永不适配的抑制规则，只会让真正的故障被自己遮蔽。
+
+它只在 `observability` profile 里启动（`docker compose -f deploy/docker-compose.prod.yml
+--profile observability up -d`），访问 `127.0.0.1:9093`。CI 的 `ops` job 用
+`amtool check-config` 校验——**能证明它能解析、路由与接收人引用合法，不能证明真的送达**
+（没有配 integration）。
+
+### 3.2 接上 Prometheus 之后先看什么
+
+1. `http://127.0.0.1:9090/api/v1/rules`：8 条规则都在、状态 `ok`；
+2. `http://127.0.0.1:9093`：路由树里 `severity="critical"` 指向 `critical` 接收人；
+3. 人为制造一次（停掉后端 → `HighServerErrorRatio`），确认它出现在 Alertmanager 的
+   `/alerts` 里，而不是只出现在 Prometheus 的 UI 上。
+
 前置条件：**必须开启 `BACKEND_RECONCILE_INTERVAL`**（生产 compose 默认 30s）。没开时业务 gauge 不存在，
 告警不会误报，但也永远不会响——这一条要进部署检查单。
 

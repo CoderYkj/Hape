@@ -45,6 +45,9 @@ fi
 step "contract (apigen -check)"
 go run ./tools/apigen -check || record "contract"
 
+step "docs (links, index counts, md/html mirrors)"
+sh scripts/docs-check.sh || record "docs"
+
 printf '\n'
 if [ "$fail" -ne 0 ]; then
   printf 'VERIFY FAILED: %s\n' "${failed_steps[*]}"

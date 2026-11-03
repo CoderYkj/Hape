@@ -144,3 +144,15 @@ BACKEND_SERVICE_CREDENTIALS="nakama=<tok>:account.login,account.get_player
 | 8 客户端重登 | `clients/minimal/main.go`（`caller.do`） | `main_test.go`：401 → 重登一次 → 重放成功；持续 401 不循环；无 `relogin` 时原样返回 |
 
 本机还跑过：`go test ./...`（含 `BACKEND_TEST_DATABASE_URL` 指向本地 PG16，全部 ok）。
+## 8. 补记（同日，盘点发现的三件运维缺口）
+
+本文只覆盖了"路线图已命名"的八项。把 A/C/D 之外的东西记进 `docs/roadmap.md` §6 时，
+其中最要命的三条顺手做掉了：
+
+| 项 | 落地 | 验证 |
+|---|---|---|
+| **告警送不到人**（有规则、无 Alertmanager） | `deploy/prometheus/alertmanager.yml`（分组、critical 更快、receivers 故意不带 integration）；prod compose 的 `observability` profile 增加 alertmanager 服务；`prometheus.yml` 加 `alerting` 目标 | `ops` job：`amtool check-config`。**它能证明解析与引用合法，不能证明送达**——文件注释里写明了这一点 |
+| **归档只做了一半**（`failed` 不搬、没有反向脚本） | `db-archive.sh` 的谓词改为"没人还需要"：`release_pending = false` 且（已确认释放 或 从未分配）；新增 `scripts/db-archive-restore.sh`（单事务、按外键顺序、id 已活着则拒绝） | `ops` job：failed 的归档/保留各断言一次；恢复后回到源表、离开冷表；重复恢复被拒 |
+| **文档门禁缺失**（链接、索引计数、md↔html 镜像） | `scripts/docs-check.sh`；`verify` job 与 `scripts/verify.sh` 都调用 | 本地负例实测：md 多一行 → 抓到；引用不存在的文档 → 抓到 |
+
+这三条都进 `roadmap.md` §6.2/§6.1 并标 ✅，不属于本文原本的八项。

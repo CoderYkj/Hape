@@ -1,0 +1,41 @@
+# alertmanager.yml - routing for the rules in hape.rules.yml.
+#
+# Why this file exists: rules that fire into nothing are worse than no rules - they look like
+# coverage. Prometheus will evaluate hape.rules.yml either way; without an Alertmanager target
+# nothing is grouped, deduplicated, silenced, or delivered.
+#
+# The receivers below have no integrations on purpose: this is the topology and the routing
+# policy, and it discards alerts rather than pretending to deliver them. Add a real receiver
+# (webhook/slack/pagerduty) where the comment says so; `amtool check-config` in CI keeps the
+# shape valid as you do.
+#
+#   docker run --rm -v "$PWD/deploy/prometheus:/am:ro" \
+#     --entrypoint amtool prom/alertmanager:v0.27.0 check-config /am/alertmanager.yml
+route:
+  # group_by alertname+service: one notification per (alert, service) instead of one per
+  # instance, and the four hours between repeats is "a human has time to look" at this size.
+  receiver: default
+  group_by: [alertname, service]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Money and settlement pages faster than a warning: the backend cannot pay a player out
+    # and the DS keeps retrying, so the clock matters.
+    - matchers: ['severity="critical"']
+      receiver: critical
+      group_wait: 10s
+      repeat_interval: 1h
+
+# inhibit_rules: []
+#   Deliberately empty. The usual first inhibition ("silence a 5xx alert while a deploy runs")
+#   needs a deploy marker nobody emits yet; an inhibition that never matches is noise in the
+#   config, and an aggressive one hides the outage you are in. Add it with the deploy hook.
+
+receivers:
+  # No integration: routes here are valid and drop. Replace with e.g.
+  #   webhook_configs:
+  #     - url: https://hooks.example/pager
+  #       send_resolved: true
+  - name: default
+  - name: critical

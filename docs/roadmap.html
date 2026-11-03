@@ -255,8 +255,50 @@
 </tbody>
 </table>
 
+<h2>6. 未归类缺口（2026-11-03 盘点发现，未进任何清单）</h2>
+<p class="lead">前三节按里程碑排。这一节是盘点时发现的、<strong>从来没有被写进路线图</strong>的东西——它们不是"以后再说"，而是没人命名过，所以不会有人排期。</p>
+
+<h3>6.1 工程与流程（CI 里没有的门禁）</h3>
+<table>
+<thead><tr><th>项</th><th>现状</th><th>代价</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>依赖漏洞扫描</td><td>无 <code>govulncheck</code>、无 Dependabot；CI 只有 <code>go vet</code></td><td>低（依赖少），漏了只能在事故里发现</td><td><span class="badge todo">⬜ 2 小时</span></td></tr>
+<tr><td>静态检查层</td><td>只有 <code>gofmt</code> + <code>go vet</code>，无 staticcheck/gosec</td><td>中</td><td><span class="badge todo">⬜ 半天</span></td></tr>
+<tr><td>覆盖率</td><td>CI 不输出、无阈值</td><td>中（<code>go test -cover</code> 一行）</td><td><span class="badge todo">⬜ 1 小时</span></td></tr>
+<tr><td><strong>文档门禁</strong></td><td>链接检查曾是手工命令；<code>roadmap.md ↔ .html</code> 靠人同步</td><td>已发生 5 次计数不一致</td><td><span class="badge ok">✅ scripts/docs-check.sh + verify job</span></td></tr>
+<tr><td>发布说明</td><td>镜像按 <code>&lt;sha&gt;</code> 推，无 CHANGELOG</td><td>回滚靠人记</td><td><span class="badge todo">⬜ 以后</span></td></tr>
+<tr><td>Makefile</td><td>15 个 target，CI 一个都没用；Windows 没有 <code>make</code></td><td>低，但是双份真相</td><td><span class="badge todo">⬜ 以后</span></td></tr>
+</tbody>
+</table>
+
+<h3>6.2 运维（比 §1.1 更细）</h3>
+<table>
+<thead><tr><th>项</th><th>现状</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td><strong>告警送不到人</strong></td><td>规则会触发，但没有 Alertmanager：无路由、去重、静默、接收人</td><td><span class="badge ok">✅ alertmanager.yml + observability profile + amtool 校验</span></td></tr>
+<tr><td>归档只做了一半</td><td>只搬 finished；failed 会话永久堆积；没有搬回来的脚本</td><td><span class="badge ok">✅ failed 纳入 + 恢复脚本 + 双向断言</span></td></tr>
+<tr><td>30 天窗口 vs 15 天保留</td><td>SLO 要 30 天窗口，Prometheus <code>retention=15d</code></td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>日志聚合与 tracing</td><td>指标之外没有任何横切观测</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>镜像与备份保留策略</td><td>未定（<code>deploy.md</code> §11.7 自己列为没有 CI 覆盖）</td><td><span class="badge todo">⬜</span></td></tr>
+<tr><td>告警抑制/静默</td><td><code>inhibit_rules</code> 为空，注释写清原因（没有发布标记）</td><td><span class="badge todo">⬜</span></td></tr>
+</tbody>
+</table>
+
+<h3>6.3 产品与领域（代码里有痕迹，没人写规格）</h3>
+<table>
+<thead><tr><th>项</th><th>现状（核实过）</th><th>需要谁</th></tr></thead>
+<tbody>
+<tr><td><strong>队伍排队只做了一半</strong></td><td><code>Party</code> 会存进队列表，但 <code>store.Pop</code> 的配对逻辑完全不看 party</td><td>产品拍板：参与配对，还是"仅记录"</td></tr>
+<tr><td><strong>economy 没有价目表</strong></td><td><code>purchase</code> 的 <code>amount</code> 由调用方传，代码里没有价格来源</td><td>产品拍板：定价权归属</td></tr>
+<tr><td>排行榜写死 50 条</td><td><code>rank.get_leaderboard</code> 里 <code>limit := 50</code>，无参数、无周期</td><td>领域设计</td></tr>
+<tr><td>无商店/成就/赛季/MMR 衰减</td><td>只有 wallet/ledger/grant/purchase</td><td>产品</td></tr>
+<tr><td>无好友/邀请/私聊</td><td>team 服务自实现 create/join/get，Nakama 社交能力未接</td><td>产品</td></tr>
+</tbody>
+</table>
+
+<h2>7. 怎么更新这页</h2>
 <div class="note">
-  <p><strong>怎么更新这页</strong>：先改 <code>docs/roadmap.md</code>（源）与对应 spec 的「状态」行，
+  <p>先改 <code>docs/roadmap.md</code>（源）与对应 spec 的「状态」行，
   再同步本页。关闭一项时把它从"未实现 / 现在该做"移到「已关闭」，并写清规格编号——
   <strong>没写规格的"完成"不算完成</strong>。</p>
 </div>

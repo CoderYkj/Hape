@@ -14,6 +14,15 @@ global:
 rule_files:
   - /etc/prometheus/hape.rules.yml
 
+# Rules without an Alertmanager target fire into nothing: they show up in the Prometheus UI
+# and never reach a person. The service below only exists under the `observability` profile,
+# so in a deployment that runs Prometheus alone these sends fail harmlessly - which is the
+# honest state, and visible in Prometheus' own alerting page.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   - job_name: hape-backend
     metrics_path: /metrics

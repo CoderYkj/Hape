@@ -136,7 +136,47 @@
 | **台账归档**（迁移 0005 + `db-archive.sh`，dry-run 默认、确认才写） | spec 0020 |
 | **客户端 token 过期重登**（401 → 重登一次 → 重放，带自动化断言） | spec 0020 |
 
-## 6. 怎么更新这页
+## 6. 未归类缺口（2026-11-03 盘点发现，未进任何清单）
+
+前三节是按里程碑排的。这一节是盘点时发现的、**从来没有被写进路线图**的东西——它们不是"以后再说"，
+而是没人命名过，所以不会有人排期。按"谁解开它"同样分三层。
+
+### 6.1 工程与流程（CI 里没有的门禁）
+
+| 项 | 现状 | 代价 | 状态 |
+|---|---|---|---|
+| 依赖漏洞扫描 | 无 `govulncheck`、无 Dependabot/Renovate；CI 只有 `go vet` | 低（依赖少），但漏了只能在事故里发现 | ⬜ 2 小时 |
+| 静态检查层 | 只有 `gofmt` + `go vet`，无 staticcheck/gosec | 中 | ⬜ 半天 |
+| 覆盖率 | CI 不输出、无阈值 | 中（`go test -cover` 一行） | ⬜ 1 小时 |
+| **文档门禁** | 链接检查曾是 `docs/README.md` 里的手工命令；`roadmap.md ↔ .html` 靠人同步 | 已发生 5 次计数不一致（本次盘点修的就是） | ✅ `scripts/docs-check.sh` + `verify` job |
+| 发布说明 | 镜像按 `<sha>` 推，无 CHANGELOG/release notes | 回滚靠人记 | ⬜ 以后 |
+| Makefile | 15 个 target，CI 一个都没用；Windows 没有 `make` | 低，但是双份真相 | ⬜ 以后 |
+
+### 6.2 运维（比 §1.1 更细）
+
+| 项 | 现状 | 状态 |
+|---|---|---|
+| **告警送不到人** | 规则会触发，但 `deploy/prometheus/` 只有抓取配置与规则，没有 Alertmanager：没有路由、去重、静默、接收人 | ✅ `alertmanager.yml` + prod compose 的 `observability` profile + `ops` job 用 `amtool check-config` 校验 |
+| 归档只做了一半 | 只搬 `finished` 且已确认释放的会话；`failed` 会话永久堆在源表；也没有"搬回来"的脚本 | ✅ `failed` 会话纳入（不待回收者）、`scripts/db-archive-restore.sh`、`ops` job 断言双向 |
+| 30 天窗口 vs 15 天保留 | SLO 要 30 天窗口，Prometheus `retention=15d` | ⬜ 提高保留或加远端写入 |
+| 日志聚合与 tracing | 指标之外没有任何横切观测 | ⬜ 有 k8s/托管日志时再上 |
+| 镜像与备份的保留策略 | 未定（`deploy.md` §11.7 自己列为"没有 CI 覆盖"） | ⬜ 部署选择 |
+| 告警抑制/静默策略 | Alertmanager 配置里 `inhibit_rules` 是空的，注释写清了原因（没有发布标记可依据） | ⬜ 有发布钩子后再加 |
+
+### 6.3 产品与领域（代码里有痕迹，没人写规格）
+
+| 项 | 现状（核实过） | 需要谁 |
+|---|---|---|
+| **队伍排队只做了一半** | `CreateTicketRequest.Party` 会存进队列表，但 `store.Pop` 的配对逻辑完全不看 party——同一队伍可能被拆到不同对局 | 产品拍板：party 参与配对，还是契约里明确"仅记录" |
+| **economy 没有价目表** | `purchase` 的 `amount` 由调用方传，注释写"the server owns pricing"，但代码里没有价格来源 | 产品拍板：定价权归调用方还是要有目录/价目 |
+| 排行榜写死 50 条 | `rank.get_leaderboard` 里 `limit := 50`，无查询参数、无周期/赛季（刚给 ledger 做完游标分页，这里反而更差） | 领域设计 |
+| 无商店/物品目录、无成就/任务、无 MMR 衰减 | 只有 `economy.grant`/`purchase`/`wallet`/`ledger` | 产品 |
+| 无好友/邀请/私聊 | team 服务自己实现了 create/join/get，Nakama 的社交能力没接 | 产品 |
+
+> 这一节的作用：让"没人命名过的缺口"变成有人命名的。它们不该挤进 M2–M5 的里程碑，
+> 但也不该在下一次盘点时才被发现。
+
+## 7. 怎么更新这页
 
 1. 状态变化先改这里（Markdown）；同时改对应 spec 的「状态」行与 `docs/architecture-map.md` 的表格。
 2. 然后同步 `docs/roadmap.html`（结构与本节一致）。

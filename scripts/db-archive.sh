@@ -4,9 +4,15 @@
 # Why: sessions and their children only ever grow (spec 0018 leftover). The live tables are
 # what the reconciler and the dashboard scan, so they should hold "recent" only.
 #
-# What is archived: sessions with state = finished AND released_at IS NOT NULL AND
-# created_at < ARCHIVE_BEFORE, plus their players, battle report and per-player results.
-# A session still awaiting release confirmation is NOT touched: the reconciler needs it.
+# What is archived: finished or failed sessions older than ARCHIVE_BEFORE that nothing can
+# still need - release_pending is false, and either the provider confirmed the stop
+# (released_at set) or there was never an instance (allocation_id null). Their players, battle
+# report and per-player results go with them.
+#
+# A session with release_pending = true is NEVER touched: the reconciler is still retrying
+# its release, and moving it would make the retry loop's query silently miss it. Failed
+# sessions are included because a failed allocation is still history that accumulates; a
+# failed one that never got an instance has nothing to release at all.
 #
 # Safety:
 #   - ARCHIVE_BEFORE is required and has no default. "How old is old" is a business
@@ -38,9 +44,10 @@ sql_batch() {
 BEGIN;
 CREATE TEMP TABLE archive_batch ON COMMIT DROP AS
   SELECT id FROM sessions
-   WHERE state = 'finished'
-     AND released_at IS NOT NULL
-     AND created_at < :'before';
+   WHERE state IN ('finished', 'failed')
+     AND release_pending = false
+     AND created_at < :'before'
+     AND (released_at IS NOT NULL OR allocation_id IS NULL);
 
 SELECT
   (SELECT count(*) FROM archive_batch)                              AS sessions,

@@ -66,7 +66,8 @@ backend_service_scope_would_deny_total{service}  counter  观察模式下"本会
 | 7 | `SettlementLatencyDegraded` | 结算 p99 超过阈值（`backend_request_duration_seconds`） |
 | 8 | `ServiceScopeDenied` | `backend_service_scope_denied_total` 或观察模式的 `..._would_deny_total` 在 10 分钟内有增长（spec 0016 / 0020） |
 
-**还没有的**（见 `docs/roadmap.md`）：Alertmanager 路由与静默。
+**路由**：`deploy/prometheus/alertmanager.yml`（分组 / critical 更快 / receivers 不带 integration，
+CI 用 `amtool check-config` 校验）。**还没有的**：抑制与静默策略（需要发布标记）、真实接收人。
 
 ## 调试顺序（线上问题）
 

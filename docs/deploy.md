@@ -371,9 +371,21 @@ ARCHIVE_CONFIRM=yes ARCHIVE_BEFORE=2026-01-01 DATABASE_URL=... sh scripts/db-arc
 ```
 
 - `ARCHIVE_BEFORE` **必须显式给**：多久算旧是业务决定，不给默认值。
-- 只搬 `state='finished' AND released_at IS NOT NULL`：仍待回收的会话 reconciler 还要用。
+- 只搬"没人还需要"的会话：`release_pending = false`，且要么厂商已确认停止（`released_at`
+  非空），要么从未分配到实例（`allocation_id` 为空）。仍待回收的会话 reconciler 还要用，
+  一律不动；`failed` 会话也搬（失败的分配同样是历史，会累积）。
 - 单事务，子表先搬；重跑是 no-op。归档表没有外键，所以搬回去也简单
   （`INSERT INTO sessions SELECT ... FROM sessions_archive`）。
+- **恢复**（把归档搬回源表，例如客诉查证）：
+
+  ```bash
+  RESTORE_SESSION_IDS=s_abc123 DATABASE_URL=... sh scripts/db-archive-restore.sh            # 先看
+  ARCHIVE_RESTORE_CONFIRM=yes RESTORE_SESSION_IDS=s_abc123 DATABASE_URL=... \
+    sh scripts/db-archive-restore.sh                                                        # 再搬
+  ```
+
+  一个事务、按外键顺序；**id 已在源表里就拒绝**——否则归档副本会被删掉而源行保留，等于
+  静默丢掉归档里的版本。
 - 调度（cron / systemd timer）属部署选择，脚本只保证可重复执行。
 
 ### 11.7 这一节里哪些是 CI 验证过的
@@ -390,7 +402,9 @@ ARCHIVE_CONFIRM=yes ARCHIVE_BEFORE=2026-01-01 DATABASE_URL=... sh scripts/db-arc
 | 凭证最小权限 | `pkg/httpx` 解析/语义单测；`platform` 端到端：限 `account` 的凭证调 `session.create` 得 403、观察模式下得 200；两个 scope 计数器分别在两种模式下 +1；覆盖性测试断言示例 env 能触达每个 service-auth op |
 | 凭证轮换 | `pkg/httpx` / `platform` 单测：重叠期两条都通过且各自身份正确、移除旧的后旧 401、重复 token 拒绝启动、（dev 与 prod 两条 auth 路径都覆盖） |
 | 生产 compose 结构合法 | `ops` job：`--env-file backend.env.example config -q` |
-| 归档只搬该搬的 | `ops` job：旧会话被搬走、年轻会话与"未确认释放"的会话留下、重跑 no-op |
+| 归档只搬该搬的 | `ops` job：旧会话与可归档的 `failed` 被搬走，年轻/未确认释放/待回收的留下，重跑 no-op |
+| 归档能搬回去 | `ops` job：恢复后回到源表且离开冷表，重复恢复被拒 |
+| 告警路由合法 | `ops` job：`amtool check-config`（能证明解析与引用，不能证明送达） |
 | systemd 单元语法 | `ops` job：`systemd-analyze verify` |
 | 发布镜像可运行 | `release` job：build → 推 ghcr（sha tag）→ 拉回 → 跑起来探活 |
 
