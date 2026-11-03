@@ -130,7 +130,7 @@ backend_oldest_allocating_seconds / _ready_ / _in_progress_
 ## 9. 补记（2026-11-03，全量盘点时发现的两处计数不一致）
 
 - 本文 §1 写的"6 条告警规则"是起草时的计划数；落地时多了一条 `SettlementLatencyDegraded`
-  （结算 p99 退化），**实际 7 条**，见 `deploy/prometheus/hape.rules.yml` 与 §6 的漂移测试。
-  保留原文不改，因为它在当时是准的。
+  （结算 p99 退化），后来 spec 0020 又加了 `ServiceScopeDenied`，**现为 8 条**，
+  见 `deploy/prometheus/hape.rules.yml` 与 §6 的漂移测试。保留原文不改，因为它在当时是准的。
 - `docs/slo.md` 第 4 条 SLI 仍缺数据源：`backend_allocations_failed_total` 这个 counter 不存在，
   分配成功率算不出来。已登记到 `docs/roadmap.md` §2（判据：Allocate 失败时 +1）。

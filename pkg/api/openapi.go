@@ -146,6 +146,18 @@ func (c *collector) operation(op Op) Operation {
 			Schema:   map[string]any{"type": "string"},
 		})
 	}
+	for _, q := range op.Query {
+		schema := map[string]any{"type": q.Type}
+		if q.Doc != "" {
+			schema["description"] = q.Doc
+		}
+		out.Parameters = append(out.Parameters, Parameter{
+			Name:     q.Name,
+			In:       "query",
+			Required: q.Required,
+			Schema:   schema,
+		})
+	}
 	if op.Request != nil {
 		out.RequestBody = &RequestBody{
 			Required: true,

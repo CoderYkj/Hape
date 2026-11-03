@@ -58,6 +58,13 @@ func run() error {
 		DatabaseURL:          cfg.DatabaseURL,
 		ReconcileInterval:    cfg.ReconcileInterval,
 		SessionStaleAfter:    cfg.SessionStaleAfter,
+
+		RateLimitPlayer:       cfg.RateLimitPlayer,
+		RateLimitPlayerBurst:  cfg.RateLimitPlayerBurst,
+		RateLimitService:      cfg.RateLimitService,
+		RateLimitServiceBurst: cfg.RateLimitServiceBurst,
+		RateLimitPublic:       cfg.RateLimitPublic,
+		RateLimitPublicBurst:  cfg.RateLimitPublicBurst,
 	})
 	if err != nil {
 		return err

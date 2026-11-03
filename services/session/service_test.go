@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,11 +73,12 @@ func (f *fakeSink) MatchFinished(context.Context, FinishedMatch) error {
 }
 
 type harness struct {
-	t     *testing.T
-	srv   *httptest.Server
-	app   *Service
-	store Store
-	auth  string
+	t       *testing.T
+	srv     *httptest.Server
+	app     *Service
+	store   Store
+	metrics *httpx.Metrics
+	auth    string
 	// token is the per-session DS credential of the most recent createSession call.
 	token string
 }
@@ -87,10 +89,20 @@ func newHarness(t *testing.T, alloc battlealloc.Allocator, sink ResultSink) *har
 	router := httpx.NewRouter("session", log, httpx.NewDevAuth(serviceToken))
 	store := NewMemory()
 	app := NewWithStore(log, store, alloc, sink)
+	app.SetMetrics(router.Metrics())
 	app.Register(router)
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
-	return &harness{t: t, srv: server, app: app, store: store, auth: serviceToken}
+	return &harness{t: t, srv: server, app: app, store: store, metrics: router.Metrics(), auth: serviceToken}
+}
+
+// scrape renders /metrics, which is how the counter assertions read the same text an
+// operator would.
+func (h *harness) scrape() string {
+	h.t.Helper()
+	rec := httptest.NewRecorder()
+	h.metrics.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	return rec.Body.String()
 }
 
 // do issues one request and returns the status plus the decoded body (nil for
@@ -207,6 +219,10 @@ func TestAllocationFailureFailsTheSession(t *testing.T) {
 	h.expect(status, http.StatusServiceUnavailable, "create with a dead allocator")
 	if code, _ := nested(t, body, "error", "code").(string); code != "unavailable" {
 		t.Fatalf("error code = %q, want unavailable", code)
+	}
+	// The SLO in docs/slo.md #4 is success rate, so the failure half must be a number.
+	if body := h.scrape(); !strings.Contains(body, `backend_allocations_failed_total{service="session"} 1`) {
+		t.Fatalf("allocation failure was not counted:\n%s", body)
 	}
 
 	// The session exists and is failed, so a client polling it sees the truth.
@@ -644,6 +660,10 @@ func TestAllocationRacingTheStaleSweepIsReleased(t *testing.T) {
 	h.expect(status, http.StatusServiceUnavailable, "create losing the race with the sweep")
 	if code, _ := nested(t, body, "error", "code").(string); code != "unavailable" {
 		t.Fatalf("error code = %q, want unavailable", code)
+	}
+	// spec 0017 asked for this number: the WARN log alone cannot answer "how often".
+	if body := h.scrape(); !strings.Contains(body, `backend_session_sweep_races_total{service="session"} 1`) {
+		t.Fatalf("sweep race was not counted:\n%s", body)
 	}
 
 	// The instance was handed back, not abandoned.

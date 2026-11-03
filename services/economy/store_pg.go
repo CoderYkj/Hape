@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -69,15 +70,31 @@ func (s *PG) Spend(ctx context.Context, playerID, idempotencyKey, currency strin
 }
 
 // Ledger implements Store.
-func (s *PG) Ledger(ctx context.Context, playerID string) ([]LedgerEntry, error) {
+func (s *PG) Ledger(ctx context.Context, playerID string, q LedgerQuery) ([]LedgerEntry, error) {
 	ctx, cancel := context.WithTimeout(ctx, movementTimeout)
 	defer cancel()
 
-	rows, err := s.db.Query(ctx,
-		`SELECT id, currency, amount, reason, created_at
-		   FROM ledger_entries
-		  WHERE player_id = $1
-		  ORDER BY id`, playerID)
+	query := `SELECT id, currency, amount, reason, created_at
+		    FROM ledger_entries
+		   WHERE player_id = $1
+		   ORDER BY id
+		   LIMIT $2`
+	args := []any{playerID, q.Limit}
+	if q.After != "" {
+		seq, ok := ledgerSeq(q.After)
+		if !ok {
+			return nil, ErrLedgerCursor
+		}
+		// id > cursor, not OFFSET: see LedgerQuery. The cursor is numeric sequence, so
+		// "everything after the row the client has" is a range predicate, not a scan.
+		query = `SELECT id, currency, amount, reason, created_at
+			   FROM ledger_entries
+			  WHERE player_id = $1 AND id > $2
+			  ORDER BY id
+			  LIMIT $3`
+		args = []any{playerID, seq, q.Limit}
+	}
+	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -265,4 +282,18 @@ func CurrencyList() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// ledgerSeq turns a ledger id ("l_<base36>") back into the sequence number the database
+// orders by. A cursor that does not decode is a client bug, not a reason to scan.
+func ledgerSeq(id string) (int64, bool) {
+	raw, ok := strings.CutPrefix(id, "l_")
+	if !ok {
+		return 0, false
+	}
+	seq, err := strconv.ParseInt(raw, 36, 64)
+	if err != nil || seq < 0 {
+		return 0, false
+	}
+	return seq, true
 }

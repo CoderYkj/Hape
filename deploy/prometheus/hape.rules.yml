@@ -1,6 +1,6 @@
 # hape.rules.yml - alerting rules for the backend.
 #
-# Six rules, one per thing that can quietly cost money or strand a player. Each is written
+# Eight rules, one per thing that can quietly cost money or strand a player. Each is written
 # against a metric that exists in this repository, and CI runs `promtool check rules` so a
 # rule that does not parse (or names a metric nobody exports) cannot merge.
 #
@@ -106,6 +106,28 @@ groups:
             The settlement path is getting slow. Check the database for lock contention and the
             request log for slow session.submit_result calls; a match that cannot settle keeps
             its players waiting and its server billing.
+
+  - name: hape.credentials
+    rules:
+      # spec 0016 + 0020: scope refusals are the one signal that a credential is calling
+      # something it was not given. In enforce mode they are refusals (403); in observe
+      # mode they are would-deny counts. Either way a non-zero rate means a caller is
+      # about to lose an op at the next enforcement flip, so both counters feed this rule.
+      - alert: ServiceScopeDenied
+        expr: |
+          sum by (service) (increase(backend_service_scope_denied_total[10m])) > 0
+          or
+          sum by (service) (increase(backend_service_scope_would_deny_total[10m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "a service credential is calling outside its scope"
+          description: >-
+            A credential name (or, in observe mode, a would-be refusal) appeared in the last
+            10 minutes. Log lines with "out of scope" carry caller/op/op_service; either widen
+            the scope or stop the caller, but do not leave it silently 403ing.
+          runbook: "docs/deploy.md#1151-最小权限scope与观察期落地"
 
   - name: hape.economy
     rules:

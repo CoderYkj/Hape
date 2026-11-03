@@ -50,7 +50,7 @@ backend_service_scope_would_deny_total{service}  counter  观察模式下"本会
 - `/healthz` 永远不查下游：数据库慢不该让健康进程被杀。
 - `/readyz` 才是查依赖的地方（v0 无依赖，直接 ready）。
 
-## 需要告警的七件事（小团队最小集）
+## 需要告警的八件事（小团队最小集）
 
 规则文件：`deploy/prometheus/hape.rules.yml`（每 push 由 `ops` job 用 promtool 校验，并有
 测试盯着"规则引用的指标确实被注册"）。
@@ -64,9 +64,9 @@ backend_service_scope_would_deny_total{service}  counter  观察模式下"本会
 | 5 | `DedicatedServerReleaseStuck` | `backend_release_pending_sessions > 0` 持续 15 分钟（厂商按秒计费，这是账单之前唯一的信号） |
 | 6 | `UnreleasedAllocation` | `backend_unreleased_allocations > 0` 持续 15 分钟（分配了但没释放，spec 0018 的台账） |
 | 7 | `SettlementLatencyDegraded` | 结算 p99 超过阈值（`backend_request_duration_seconds`） |
+| 8 | `ServiceScopeDenied` | `backend_service_scope_denied_total` 或观察模式的 `..._would_deny_total` 在 10 分钟内有增长（spec 0016 / 0020） |
 
-**还没有的**（见 `docs/roadmap.md`）：越权告警（`backend_service_scope_denied_total > 0`）、
-竞态计数、Alertmanager 路由与静默。
+**还没有的**（见 `docs/roadmap.md`）：Alertmanager 路由与静默。
 
 ## 调试顺序（线上问题）
 

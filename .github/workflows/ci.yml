@@ -412,6 +412,57 @@ jobs:
           fi
           MIGRATIONS_DIR=/tmp/migs sh scripts/db-migrate.sh 2>&1 | grep -q 'append-only'
 
+      # spec 0020 item 7. The archive must move what it claims (old, finished, release
+      # confirmed), leave what it must not (young, or still awaiting release), and be
+      # idempotent - a re-run that moves the same rows twice would corrupt the count.
+      - name: the archive moves only old settled sessions
+        run: |
+          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
+          INSERT INTO sessions (id, match_id, state, result_id, allocation_id, provider, address, port,
+                                created_at, finished_at, allocated_at, released_at)
+          VALUES ('s_old','m_old','finished','r_old','a_old','fake','10.0.0.1',7777,
+                  timestamptz '2020-01-01Z', timestamptz '2020-01-01Z',
+                  timestamptz '2020-01-01Z', timestamptz '2020-01-01Z'),
+                 ('s_new','m_new','finished','r_new','a_new','fake','10.0.0.2',7778,
+                  now() - interval '1 day', now() - interval '1 day',
+                  now() - interval '1 day', now() - interval '1 day'),
+                 ('s_pending','m_pending','finished','r_pending','a_pending','fake','10.0.0.3',7779,
+                  timestamptz '2020-01-01Z', timestamptz '2020-01-01Z',
+                  timestamptz '2020-01-01Z', NULL);
+          INSERT INTO session_players (session_id, player_id)
+            VALUES ('s_old','p1'),('s_old','p2'),('s_new','p3'),('s_pending','p4');
+          INSERT INTO match_results (result_id, session_id, duration_seconds)
+            VALUES ('r_old','s_old',300), ('r_new','s_new',300), ('r_pending','s_pending',300);
+          INSERT INTO match_player_results (result_id, player_id, won, score, kills, deaths, damage)
+            VALUES ('r_old','p1',true,10,1,0,100), ('r_old','p2',false,5,0,1,50);
+          SQL
+
+          # A cutoff is required: the script refuses to guess "how old is old".
+          if ARCHIVE_BEFORE= sh scripts/db-archive.sh; then
+            echo "::error title=archive guard::the archive ran without ARCHIVE_BEFORE"
+            exit 1
+          fi
+
+          # Dry run writes nothing.
+          ARCHIVE_BEFORE=2026-01-01 sh scripts/db-archive.sh | tee /tmp/archive-dry.txt
+          grep -q 'dry run' /tmp/archive-dry.txt
+          test "$(psql -tAc "SELECT count(*) FROM sessions WHERE id='s_old'" "$DATABASE_URL")" = "1"
+
+          ARCHIVE_CONFIRM=yes ARCHIVE_BEFORE=2026-01-01 sh scripts/db-archive.sh
+
+          # Moved: the old, settled, release-confirmed session and its children.
+          test "$(psql -tAc "SELECT count(*) FROM sessions_archive WHERE id='s_old'" "$DATABASE_URL")" = "1"
+          test "$(psql -tAc "SELECT count(*) FROM sessions WHERE id='s_old'" "$DATABASE_URL")" = "0"
+          test "$(psql -tAc "SELECT count(*) FROM session_players_archive WHERE session_id='s_old'" "$DATABASE_URL")" = "2"
+          test "$(psql -tAc "SELECT count(*) FROM match_player_results_archive WHERE result_id='r_old'" "$DATABASE_URL")" = "2"
+          # Left alone: too young, and finished-but-never-confirmed-released.
+          test "$(psql -tAc "SELECT count(*) FROM sessions WHERE id='s_new'" "$DATABASE_URL")" = "1"
+          test "$(psql -tAc "SELECT count(*) FROM sessions WHERE id='s_pending'" "$DATABASE_URL")" = "1"
+
+          # Idempotent: nothing left to move.
+          ARCHIVE_CONFIRM=yes ARCHIVE_BEFORE=2026-01-01 sh scripts/db-archive.sh > /tmp/archive-rerun.txt
+          grep -Eq '^\s+0 \|\s+0 \|\s+0 \|\s+0' /tmp/archive-rerun.txt
+
       - name: a backup survives losing the data
         run: |
           psql -v ON_ERROR_STOP=1 -c \

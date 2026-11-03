@@ -147,7 +147,7 @@
 <thead><tr><th>#</th><th>做什么</th><th>为什么现在</th><th>判据</th><th>估算</th></tr></thead>
 <tbody>
 <tr><td>1</td><td><strong>第一次真机部署</strong>：systemd / compose + TLS 反代 + 备份恢复演练 + 重启与磁盘验证</td><td>代码只在 CI 容器与本机跑过，<strong>从未在一台真机上</strong>；这是"脚手架 → 系统"的分界</td><td>重启后数据在；备份恢复到新库后服务能起；TLS 下客户端能连；<code>/metrics</code> 被采集到</td><td>3–5 人日</td></tr>
-<tr><td>2</td><td><s>Prometheus + 告警 + 压测基线</s> → <strong>已做（spec 0019）</strong>；剩下接一台真实例与 soak</td><td>规则与指标的一致性在 CI 里校验过，但<strong>没有真实 Prometheus 采过</strong>，也没有 1 小时以上的持续压测</td><td>7 条规则各被真实流量触发一次；soak 1 小时后 p99 与内存不漂</td><td>1–2 人日</td></tr>
+<tr><td>2</td><td><s>Prometheus + 告警 + 压测基线</s> → <strong>已做（spec 0019）</strong>；剩下接一台真实例与 soak</td><td>规则与指标的一致性在 CI 里校验过，但<strong>没有真实 Prometheus 采过</strong>，也没有 1 小时以上的持续压测</td><td>8 条规则各被真实流量触发一次；soak 1 小时后 p99 与内存不漂</td><td>1–2 人日</td></tr>
 <tr><td>3</td><td><strong>DS 运行时契约评审</strong>（交给 UE5 组）</td><td>唯一会<strong>阻塞引擎进度</strong>的事；越早暴露"他们还缺什么"越好</td><td>引擎组确认 env 表 + 两个上报接口 + <code>result_id</code> 幂等可照做；6 件待拍板项有结论（<code>docs/ds-runtime-contract.md</code> §6）</td><td>0.5 人日（一次会）</td></tr>
 <tr><td>4</td><td><strong>计费对账 + Edgegap <code>env_vars</code> 复验</strong></td><td>都只差"一次真实操作"，但直接对应钱</td><td>见上文各判据</td><td>1.5–2.5 人日</td></tr>
 <tr><td>5</td><td><strong>三份 ADR</strong>：战报 <code>schema_version</code> / 掉线重连会话模型 / 结算事件化（outbox）</td><td>纯设计、成本低；等 UE5 上线或拆分时再想，就是推翻重来</td><td>三份 ADR 通过评审，写清触发条件与兼容策略</td><td>1–2 人日</td></tr>
@@ -170,15 +170,10 @@
 <strong>一句话：先让它在真机上跑起来，再让数字说话。</strong></p></div>
 <h2>2. 现在就能做、不被任何外部条件阻塞</h2>
 <div class="chips">
-  <span class="chip"><span class="badge todo">⬜</span> op 级 ACL —— 半天</span>
-  <span class="chip"><span class="badge todo">⬜</span> 越权告警规则 —— 1 小时</span>
-  <span class="chip"><span class="badge todo">⬜</span> 分配失败指标 —— 1 小时</span>
-  <span class="chip"><span class="badge todo">⬜</span> 清扫竞态计数 —— 1 小时</span>
-  <span class="chip"><span class="badge todo">⬜</span> 入站限流（429 模型已有，无人返回） —— 半天</span>
-  <span class="chip"><span class="badge todo">⬜</span> 读接口分页（ledger 无 LIMIT） —— 2–3 小时</span>
   <span class="chip"><span class="badge todo">⬜</span> Edgegap <code>env_vars</code> 复验 —— 镜像已发布，只需分配一次</span>
   <span class="chip"><span class="badge todo">⬜</span> 计费对账 —— 需厂商账单访问</span>
   <span class="chip"><span class="badge mid">🟡</span> Prometheus 接上 —— 只需一台机器</span>
+  <span class="chip"><span class="badge ok">✅</span> 纯代码六项 + 归档 + 客户端重登 —— 已清（spec 0020）</span>
 </div>
 
 <h3>每一项的判据</h3>
@@ -212,7 +207,7 @@
 <tr><td>M2 真实托管分配器</td><td>分配 + 回收 + 对账闭环</td><td>✅ 完成（spec 0015 + 0018）。仅剩厂商账单逐行比对；GameLift/Agones 与多实例选主按触发条件延后</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td>M3 Nakama 落地</td><td>账号 / RPC / 客户端链路</td><td>UE5 客户端实现（协议已验证，C++ 未编译）；<strong>生产形态的 Nakama 编排 / 密钥分发</strong>（见 §4）</td><td><span class="badge mid">🟡</span></td></tr>
 <tr><td>M4 服务拆分</td><td>rank / matchmaking 独立进程</td><td>消息总线或 gRPC、mTLS 或短期令牌、sink 改造、选主</td><td><span class="badge todo">⬜</span></td></tr>
-<tr><td>M5 可观测与容量</td><td>指标、压测、SLO</td><td>指标与 7 条告警 ✅、本机基线（内存 307 场/秒、PG 121 场/秒）🟡；缺 SLO 定义、soak、多机与真实网络</td><td><span class="badge mid">🟡</span></td></tr>
+<tr><td>M5 可观测与容量</td><td>指标、压测、SLO</td><td>指标与 8 条告警 ✅、本机基线（内存 307 场/秒、PG 121 场/秒）🟡；缺 SLO 定义、soak、多机与真实网络</td><td><span class="badge mid">🟡</span></td></tr>
 </tbody>
 </table>
 
@@ -250,7 +245,13 @@
 <tr><td>凭证最小权限（默认拒绝 + 覆盖性测试 + 观察期）</td><td>spec 0016</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td>回收指标 + 1 条告警规则</td><td>spec 0015</td><td><span class="badge ok">✅</span></td></tr>
 <tr><td><strong>分配台账</strong>（分配/释放时间线、实例秒数、未确认分配报表与指标）</td><td>spec 0018</td><td><span class="badge ok">✅</span></td></tr>
-<tr><td><strong>观测接线 + 7 条告警 + 压测基线</strong>（含并发 ID 碰撞修复）</td><td>spec 0019</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><strong>观测接线 + 8 条告警 + 压测基线</strong>（含并发 ID 碰撞修复、越权告警）</td><td>spec 0019 / 0020</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><strong>op 级 ACL</strong>（<code>service.op</code> scope + 启动时校验 op 拼写）</td><td>spec 0020</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><strong>入站限流</strong>（按玩家/凭证的令牌桶，429 + <code>Retry-After</code>）</td><td>spec 0020</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><strong>读接口分页</strong>（<code>get_ledger</code> 的 <code>limit</code>/<code>after</code> 游标）</td><td>spec 0020</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><strong>分配失败 / 清扫竞态计数</strong></td><td>spec 0020</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><strong>台账归档</strong>（迁移 0005 + <code>db-archive.sh</code>，dry-run 默认）</td><td>spec 0020</td><td><span class="badge ok">✅</span></td></tr>
+<tr><td><strong>客户端 token 过期重登</strong>（401 → 重登一次 → 重放）</td><td>spec 0020</td><td><span class="badge ok">✅</span></td></tr>
 </tbody>
 </table>
 

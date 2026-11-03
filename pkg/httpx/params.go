@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"gamebackend/pkg/apierr"
@@ -71,4 +72,29 @@ func IdempotencyKey(r *http.Request) (string, error) {
 		return "", apierr.Invalid("Idempotency-Key must be at most 128 characters").WithDetail("header", "Idempotency-Key")
 	}
 	return key, nil
+}
+
+// QueryInt reads an integer query parameter, clamped to [1, max]. Absent means def.
+//
+// Clamping rather than rejecting an oversized limit keeps a misconfigured dashboard from
+// turning into a 400 on a read path, while still bounding the response. A non-numeric
+// value is a client bug and is refused.
+func QueryInt(r *http.Request, name string, def, max int) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get(name))
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, apierr.Invalid("query parameter "+name+" must be an integer").
+			WithDetail("parameter", name)
+	}
+	if n < 1 {
+		return 0, apierr.Invalid("query parameter "+name+" must be positive").
+			WithDetail("parameter", name)
+	}
+	if max > 0 && n > max {
+		n = max
+	}
+	return n, nil
 }

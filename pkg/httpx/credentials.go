@@ -40,6 +40,20 @@ func (c ServiceCredential) Allows(service string) bool {
 	return false
 }
 
+// AllowsOp reports whether this credential may call exactly this operation.
+//
+// A scope entry is one of three things: "*" (every op), a service name (every op of that
+// service), or an op id. Service-level entries stay valid, so a deployment written before
+// op-level scopes existed keeps working unchanged.
+func (c ServiceCredential) AllowsOp(opID, service string) bool {
+	for _, allowed := range c.Services {
+		if allowed == "*" || allowed == service || allowed == opID {
+			return true
+		}
+	}
+	return false
+}
+
 // ServiceCredentials is the set of credentials this process accepts.
 type ServiceCredentials []ServiceCredential
 
@@ -57,6 +71,11 @@ const (
 var (
 	credentialNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 	serviceNamePattern    = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+	// opNamePattern is the op-level form of a scope entry: "<service>.<verb>", e.g.
+	// "account.login". A credential can name the exact operations it needs instead of
+	// a whole service, which is what "nakama may exchange identities and nothing else"
+	// actually means.
+	opNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}\.[a-z][a-z0-9_]{0,31}$`)
 )
 
 // ParseServiceCredentials reads `name=token[:service+service]`, comma separated.
@@ -132,8 +151,8 @@ func parseScope(name, scope string, hasScope bool) ([]string, error) {
 		if part == "" {
 			return nil, fmt.Errorf("service credential %q has an empty scope entry (check the '+' separators)", name)
 		}
-		if part != AllServices && !serviceNamePattern.MatchString(part) {
-			return nil, fmt.Errorf("service credential %q has an invalid service %q", name, part)
+		if part != AllServices && !serviceNamePattern.MatchString(part) && !opNamePattern.MatchString(part) {
+			return nil, fmt.Errorf("service credential %q has an invalid scope entry %q (want a service, \"service.op\", or %q)", name, part, AllServices)
 		}
 		if seen[part] {
 			return nil, fmt.Errorf("service credential %q lists %q twice", name, part)
@@ -178,8 +197,8 @@ func (c ServiceCredentials) Validate() error {
 				wildcard++
 				continue
 			}
-			if !serviceNamePattern.MatchString(service) {
-				return fmt.Errorf("service credential %q has an invalid service %q", cred.Name, service)
+			if !serviceNamePattern.MatchString(service) && !opNamePattern.MatchString(service) {
+				return fmt.Errorf("service credential %q has an invalid scope entry %q (want a service, \"service.op\", or %q)", cred.Name, service, AllServices)
 			}
 		}
 		if wildcard > 1 || (wildcard == 1 && len(cred.Services) > 1) {
@@ -248,10 +267,31 @@ func (c ServiceCredentials) UnknownServices(known map[string]bool) []string {
 	var unknown []string
 	for _, cred := range c {
 		for _, service := range cred.Services {
-			if service == AllServices || known[service] {
+			// Op-level entries are checked by UnknownOps against the real op ids: they
+			// are not service names, so they would always look unknown here.
+			if service == AllServices || known[service] || strings.Contains(service, ".") {
 				continue
 			}
 			unknown = append(unknown, cred.Name+":"+service)
+		}
+	}
+	sort.Strings(unknown)
+	return unknown
+}
+
+// UnknownOps returns the op-level scope entries that this process does not serve.
+//
+// Same reasoning as UnknownServices: an op id that does not exist is a typo, and a typo
+// means the credential silently cannot call what it was scoped for. It must fail at
+// startup, not on the first request.
+func (c ServiceCredentials) UnknownOps(known map[string]bool) []string {
+	var unknown []string
+	for _, cred := range c {
+		for _, entry := range cred.Services {
+			if !strings.Contains(entry, ".") || known[entry] {
+				continue
+			}
+			unknown = append(unknown, cred.Name+":"+entry)
 		}
 	}
 	sort.Strings(unknown)

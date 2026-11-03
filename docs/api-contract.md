@@ -67,6 +67,22 @@ go test ./...                # 契约测试 + e2e
 | `map[string]string` | `object` + `additionalProperties` | 钱包余额用这个 |
 | `*time.Time` | `anyOf[$ref, null]` | 可空时间 |
 
+### 3.1 查询参数
+
+查询参数和 path 参数一样属于契约：在 `api.Op` 的 `Query` 里声明，`apigen` 渲染成 OpenAPI
+的 `in: query` 参数，`api.Validate` 要求名字是 snake_case、类型只能是 `integer`/`string`/
+`boolean`、每个参数必须写 `Doc`。
+
+当前唯一使用方是 `economy.get_ledger`：
+
+| 参数 | 类型 | 说明 |
+|---|---|---|
+| `limit` | integer | 页大小 1–200，缺省 50；超过上限按上限截断（不报错） |
+| `after` | string | 上一页响应里的 `next_after`；省略表示第一页 |
+
+**用游标不用偏移**：账本只追加，用 offset 时两页之间新入账一笔会让后面的行整体错位，
+客户端就会重复一行、漏掉一行。游标不存在或不属于该玩家时返回 400，而不是悄悄回到第一页。
+
 ## 4. 消费契约
 
 - **运营/调试**：`curl` 直接打（`api/openapi/*.json` 里有完整字段）。

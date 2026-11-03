@@ -161,3 +161,77 @@ func TestUnknownServicesAreReported(t *testing.T) {
 		t.Fatalf("unknown = %v, want [a:econmy]", unknown)
 	}
 }
+
+// TestOpScopesParseAndNarrow is the op-level form of least privilege: a credential can name
+// exact operations instead of a whole service, and service-level entries keep working in
+// the same list (that is what makes this an additive change, not a migration).
+func TestOpScopesParseAndNarrow(t *testing.T) {
+	creds, err := httpx.ParseServiceCredentials(
+		"nakama=abc:account.login+account.get_player,worker=xyz:matchmaking+session.create")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	var nakama, worker httpx.ServiceCredential
+	for _, cred := range creds {
+		switch cred.Name {
+		case "nakama":
+			nakama = cred
+		case "worker":
+			worker = cred
+		}
+	}
+	cases := []struct {
+		name    string
+		cred    httpx.ServiceCredential
+		opID    string
+		service string
+		want    bool
+	}{
+		{"exact op allowed", nakama, "account.login", "account", true},
+		{"second exact op allowed", nakama, "account.get_player", "account", true},
+		{"sibling op denied", nakama, "account.create_team", "account", false},
+		{"other service denied", nakama, "session.create", "session", false},
+		{"service entry still allows its ops", worker, "session.create", "session", true},
+		{"service entry does not leak to other services", worker, "economy.grant", "economy", false},
+	}
+	for _, c := range cases {
+		if got := c.cred.AllowsOp(c.opID, c.service); got != c.want {
+			t.Fatalf("%s: AllowsOp(%q, %q) = %v, want %v (scopes %v)",
+				c.name, c.opID, c.service, got, c.want, c.cred.Services)
+		}
+	}
+}
+
+func TestOpScopesRejectMalformedEntries(t *testing.T) {
+	cases := map[string]string{
+		"op without a verb":    "a=t:account.",
+		"op without a service": "a=t:.login",
+		"uppercase op":         "a=t:account.Login",
+		"two dots":             "a=t:account.login.extra",
+		"wildcard plus an op":  "a=t:*+account.login",
+		"op duplicated":        "a=t:account.login+account.login",
+	}
+	for name, raw := range cases {
+		if _, err := httpx.ParseServiceCredentials(raw); err == nil {
+			t.Fatalf("%s should have been rejected: %q", name, raw)
+		}
+	}
+}
+
+// TestUnknownOpsAreReported is the startup guard for the op form: a typo here denies
+// silently at request time, which is exactly the failure 0016 was written about.
+func TestUnknownOpsAreReported(t *testing.T) {
+	creds := httpx.ServiceCredentials{
+		{Name: "a", Token: "1", Services: []string{"account.login", "account.logn", "account"}},
+		{Name: "b", Token: "2", Services: []string{"*"}},
+	}
+	knownServices := map[string]bool{"account": true}
+	if unknown := creds.UnknownServices(knownServices); len(unknown) != 0 {
+		t.Fatalf("op entries must not be reported as unknown services: %v", unknown)
+	}
+	knownOps := map[string]bool{"account.login": true, "account.get_player": true}
+	unknown := creds.UnknownOps(knownOps)
+	if len(unknown) != 1 || unknown[0] != "a:account.logn" {
+		t.Fatalf("unknown = %v, want [a:account.logn]", unknown)
+	}
+}

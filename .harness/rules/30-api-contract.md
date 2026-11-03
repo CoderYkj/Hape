@@ -23,6 +23,9 @@ api.Op{...} + DTO struct  ──apigen──▶  api/openapi/<service>.json
 - 路径：`/v1/<service>/<资源复数>[/{id}][/<子资源>]`，如 `/v1/economy/players/{player_id}/wallet`。
 - 路径参数用 `{snake_case}`（既是 `http.ServeMux` 通配符，也是合法 OpenAPI path template）。
 - 请求/响应体：`<Verb><Resource>Request` / `<Verb><Resource>Response`，包一层命名对象，不要裸数组。
+- 查询参数：写在 `api.Op.Query`（`Name` snake_case、类型只允许 `integer`/`string`/`boolean`、必须写 `Doc`），
+  `apigen` 会渲染成 `in: query`；不在 handler 里偷偷读一个没声明的参数。
+- 翻页一律**游标**（`after` + 响应里的 `next_after`），不用 offset：只追加的表用 offset 会重复/漏行。
 
 ## 在线格式
 

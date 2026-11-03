@@ -11,6 +11,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"gamebackend/pkg/api"
 	"gamebackend/pkg/apierr"
@@ -66,7 +67,17 @@ type PurchaseResponse struct {
 // LedgerResponse lists a player's movements.
 type LedgerResponse struct {
 	Entries []LedgerEntry `json:"entries" doc:"Immutable movements, oldest first."`
+	// NextAfter is the cursor to pass as ?after= for the next page. Empty means this is the
+	// last page.
+	NextAfter string `json:"next_after" doc:"Cursor for the next page; empty when there is none."`
 }
+
+// Ledger pagination. The default is what a UI can render without thinking; the cap is what
+// keeps one request from materialising a whale's whole history.
+const (
+	defaultLedgerLimit = 50
+	maxLedgerLimit     = 200
+)
 
 // Register mounts the economy operations on r.
 func (s *Service) Register(r *httpx.Router) {
@@ -111,9 +122,13 @@ func (s *Service) Register(r *httpx.Router) {
 		Service:  "economy",
 		Method:   http.MethodGet,
 		Path:     "/v1/economy/players/{player_id}/ledger",
-		Summary:  "Read the caller's ledger",
+		Summary:  "Read the caller's ledger, newest pages by cursor",
 		Response: api.T(LedgerResponse{}),
 		Auth:     api.AuthPlayer,
+		Query: []api.QueryParam{
+			{Name: "limit", Type: "integer", Doc: "Page size, 1-200 (default 50). Larger values are clamped."},
+			{Name: "after", Type: "string", Doc: "Cursor from the previous page's next_after. Omit for the first page."},
+		},
 	}, s.getLedger)
 }
 
@@ -134,11 +149,22 @@ func (s *Service) getLedger(r *http.Request) (any, error) {
 	if err := httpx.RequireSelf(r, playerID); err != nil {
 		return nil, err
 	}
-	entries, err := s.store.Ledger(r.Context(), playerID)
+	limit, err := httpx.QueryInt(r, "limit", defaultLedgerLimit, maxLedgerLimit)
 	if err != nil {
 		return nil, err
 	}
-	return LedgerResponse{Entries: entries}, nil
+	after := strings.TrimSpace(r.URL.Query().Get("after"))
+	entries, err := s.store.Ledger(r.Context(), playerID, LedgerQuery{Limit: limit, After: after})
+	if err != nil {
+		return nil, err
+	}
+	// A full page means there may be more; anything shorter is the end. Saying so on every
+	// page is what lets a client stop paging without an extra probe.
+	next := ""
+	if len(entries) == limit {
+		next = entries[len(entries)-1].ID
+	}
+	return LedgerResponse{Entries: entries, NextAfter: next}, nil
 }
 
 func (s *Service) grant(r *http.Request) (any, error) {

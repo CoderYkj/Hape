@@ -185,6 +185,8 @@ graph TB
 | DS 双凭证 | ✅ | 服务 token（进程）+ 每场 `X-Session-Token`（会话）；缺一个就 401（spec 0008） |
 | 凭证轮换 | ✅ | `BACKEND_SERVICE_CREDENTIALS` 多凭证并行 + `caller=` 日志（spec 0014） |
 | **最小权限（scope）** | ✅ | 凭证声明可调 service（`name=token:svc+svc`，`*` 仅运维）；Router 按 `op.Service` 判定，越权 **403**（不是 401）；默认拒绝；拼错 scope 启动失败；`BACKEND_SERVICE_SCOPE_ENFORCE=false` 观察模式；覆盖性测试盯住示例 env。spec 0016 |
+| **op 级 scope** | ✅ | 凭证可写 `service.op`（如 `account.login`）；同域兄弟 op 403；拼错启动失败（spec 0020） |
+| 入站限流 | ✅ | 按玩家/凭证的令牌桶，429 + `Retry-After`（spec 0020） |
 | mTLS / 短期令牌 | 🔜 | M4 |
 
 ---
@@ -196,8 +198,8 @@ graph TB
 | JSON 日志（`request_id`/`op`/`status`/`caller`） | ✅ |
 | `/metrics`：请求计数、启动时间 | ✅ |
 | 业务指标：`backend_release_*`（5）、`backend_service_scope_*`（2）、`backend_sessions_*` / `backend_oldest_*`（6）、`backend_unreleased_*`（2） | ✅ spec 0015 / 0016 / 0018 / 0019 |
-| 告警规则：7 条（回收卡住、未确认分配、分配卡住、僵尸对局、5xx 比例、结算延迟、经济 500） | ✅ 规则 + promtool CI + 指标漂移测试（spec 0019） |
-| 告警规则文件（7 条，`deploy/prometheus/hape.rules.yml`） | 🟡 规则与 promtool 校验在；**没有接真实 Prometheus 实例**，所以"人为触发一次"未做过 |
+| 告警规则：8 条（回收卡住、未确认分配、分配卡住、僵尸对局、5xx 比例、结算延迟、越权调用、经济 500） | ✅ 规则 + promtool CI + 指标漂移测试（spec 0019） |
+| 告警规则文件（8 条，`deploy/prometheus/hape.rules.yml`） | 🟡 规则与 promtool 校验在；**没有接真实 Prometheus 实例**，所以"人为触发一次"未做过 |
 | 告警的静默/抑制与值班路由（Alertmanager） | 🔜 部署选择，不属代码 |
 
 ---

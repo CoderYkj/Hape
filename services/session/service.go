@@ -48,8 +48,30 @@ type Service struct {
 	store Store
 	alloc battlealloc.Allocator
 	sink  ResultSink
+	// meters is nil until the platform wires it: the counters below are only meaningful
+	// on the /metrics endpoint, and a unit test that never reads them should not have to
+	// build a registry.
+	meters *httpx.Metrics
 
 	now func() time.Time
+}
+
+// SetMetrics attaches the registry the session counters are published on, registering both
+// at zero so "zero" is a queryable fact rather than an absent series.
+func (s *Service) SetMetrics(m *httpx.Metrics) {
+	s.meters = m
+	if m == nil {
+		return
+	}
+	m.AddCounter("allocations_failed", 0)
+	m.AddCounter("session_sweep_races", 0)
+}
+
+// count increments one of the counters above when a registry is attached.
+func (s *Service) count(name string) {
+	if s.meters != nil {
+		s.meters.AddCounter(name, 1)
+	}
 }
 
 // New builds the service. sink may be nil (fan-out disabled in tests).
@@ -240,6 +262,9 @@ func (s *Service) create(r *http.Request) (any, error) {
 		RuntimeToken: runtimeToken,
 	})
 	if err != nil {
+		// Counted before the response: the SLO in docs/slo.md #4 is allocation success
+		// rate, and this is the numerator's other half.
+		s.count("allocations_failed")
 		_, _ = s.store.Update(r.Context(), id, func(sp *Session) error {
 			sp.State = StateFailed
 			return nil
@@ -269,6 +294,7 @@ func (s *Service) create(r *http.Request) (any, error) {
 	// owns a running instance is how an allocation leaks until the vendor's TTL; instead,
 	// record the allocation (so a failed release stays retryable) and hand the instance back.
 	if updated.State != StateAllocating {
+		s.count("session_sweep_races")
 		s.log.WarnContext(r.Context(), "allocation finished after the session closed; releasing the server",
 			"session_id", id, "allocation_id", allocation.ID, "state", updated.State)
 		if releaseErr := s.alloc.Release(r.Context(), allocation.ID); releaseErr != nil {

@@ -117,6 +117,9 @@ BACKEND_BASE_URL=http://backend:8080 \
 | `BACKEND_REGIONS` | `local` | 逗号分隔的区域列表 |
 | `BACKEND_RECONCILE_INTERVAL` | `0`（关闭） | 超时会话清理的周期，如 `30s`；格式错误启动即失败 |
 | `BACKEND_SESSION_STALE_AFTER` | `5m` | 会话在 `allocating`/`ready` 停留多久算死；必须为正 |
+| `BACKEND_RATE_LIMIT_PLAYER` / `_BURST` | `100` / `200` | 每玩家每秒令牌数与突发；`0` 关闭这一类 |
+| `BACKEND_RATE_LIMIT_SERVICE` / `_BURST` | `1000` / `2000` | 每服务凭证的令牌桶（按凭证名，不按 IP） |
+| `BACKEND_RATE_LIMIT_PUBLIC` / `_BURST` | `50` / `100` | 无凭证端点（当前没有）按客户端 IP 计 |
 
 两条硬规则（`Config.Validate` 与 `platform.New` 各拦一条）：
 
@@ -331,11 +334,47 @@ BACKEND_SERVICE_SCOPE_ENFORCE=true
 盯这个）；而**你实际部署的凭证集合**（尤其是从旧部署迁移过来的）只有真实流量能验证——
 所以迁移走观察期，新部署不用。
 
+### 11.5.2 入站限流（spec 0020）
+
+三类调用方各一个令牌桶，超限返回 **429** + `Retry-After`：
+
+| 类 | 键 | 默认 |
+|---|---|---|
+| player | 玩家 id | 100/s，burst 200 |
+| service | 凭证名 | 1000/s，burst 2000 |
+| public | 客户端 IP（当前没有 public op） | 50/s，burst 100 |
+
+- **按身份不按 IP**：反代后面所有调用方共用一个 IP，按 IP 限流会把 NAT 后的玩家互相牵连。
+- `X-Forwarded-For` **不信任**：没有可信代理配置之前它是攻击者可控的输入。
+- `0` 关闭该类；负数启动即失败。默认值只是"比正常客户端激进得多"的量级，不是容量结论，
+  要按 `docs/slo.md` 的真实流量再定（spec 0020 未决项）。
+- 计数：`backend_rate_limited_{player,service,public}_total`。
+- 多副本时每副本各算各的（M4 之前没有共享计数）。
+
 ### 11.6 回滚
 
 1. 镜像回滚：`BACKEND_IMAGE=<上一个 sha>` + `up -d`（无数据迁移时最安全）。
 2. 迁移回滚：**不支持向下迁移**。破坏性 schema 变更必须单独发布，先双写/回填再删列。
 3. 数据回滚：用备份 + `db-restore.sh`，且先确认备份里的 schema 与目标镜像兼容。
+
+### 11.4.1 归档：把旧对局搬去冷表（spec 0020）
+
+`sessions` 及其子表只增不减。`scripts/db-archive.sh` 把**已结束且已确认释放**、创建时间早于
+`ARCHIVE_BEFORE` 的会话搬进 `*_archive`（迁移 0005），源表只留近期：
+
+```bash
+# 先看会搬多少（默认 dry-run，不写库）
+ARCHIVE_BEFORE=2026-01-01 DATABASE_URL=... sh scripts/db-archive.sh
+
+# 确认后执行
+ARCHIVE_CONFIRM=yes ARCHIVE_BEFORE=2026-01-01 DATABASE_URL=... sh scripts/db-archive.sh
+```
+
+- `ARCHIVE_BEFORE` **必须显式给**：多久算旧是业务决定，不给默认值。
+- 只搬 `state='finished' AND released_at IS NOT NULL`：仍待回收的会话 reconciler 还要用。
+- 单事务，子表先搬；重跑是 no-op。归档表没有外键，所以搬回去也简单
+  （`INSERT INTO sessions SELECT ... FROM sessions_archive`）。
+- 调度（cron / systemd timer）属部署选择，脚本只保证可重复执行。
 
 ### 11.7 这一节里哪些是 CI 验证过的
 
@@ -351,6 +390,7 @@ BACKEND_SERVICE_SCOPE_ENFORCE=true
 | 凭证最小权限 | `pkg/httpx` 解析/语义单测；`platform` 端到端：限 `account` 的凭证调 `session.create` 得 403、观察模式下得 200；两个 scope 计数器分别在两种模式下 +1；覆盖性测试断言示例 env 能触达每个 service-auth op |
 | 凭证轮换 | `pkg/httpx` / `platform` 单测：重叠期两条都通过且各自身份正确、移除旧的后旧 401、重复 token 拒绝启动、（dev 与 prod 两条 auth 路径都覆盖） |
 | 生产 compose 结构合法 | `ops` job：`--env-file backend.env.example config -q` |
+| 归档只搬该搬的 | `ops` job：旧会话被搬走、年轻会话与"未确认释放"的会话留下、重跑 no-op |
 | systemd 单元语法 | `ops` job：`systemd-analyze verify` |
 | 发布镜像可运行 | `release` job：build → 推 ghcr（sha tag）→ 拉回 → 跑起来探活 |
 

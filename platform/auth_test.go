@@ -290,3 +290,69 @@ func TestScopeRefusalsAreCounted(t *testing.T) {
 		t.Fatalf("observe mode counted a real denial:\n%s", body)
 	}
 }
+
+// TestOpLevelScopeIsEnforced is the op-level least-privilege contract: the Nakama bridge
+// only exchanges identities, so its credential names `account.login` alone. It must be
+// able to log in and must NOT be able to read or update a profile - a service-wide scope
+// would have allowed both, which is what this narrows.
+func TestOpLevelScopeIsEnforced(t *testing.T) {
+	// Two service-auth ops in the same service: create is granted, mark_ready is not.
+	// (Account is a poor demonstration: only login is service-auth there, the rest are
+	// player-only, so a refusal would be 401 and prove nothing about scopes.)
+	app, err := platform.New(platform.Config{
+		Env:       "dev",
+		DevAuth:   true,
+		Allocator: "local",
+		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ServiceCredentials: httpx.ServiceCredentials{
+			{Name: "worker", Token: "worker-secret", Services: []string{"session.create"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("platform.New: %v", err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+	server := httptest.NewServer(app.Handler())
+	t.Cleanup(server.Close)
+
+	status, body := doJSON(t, server.URL, http.MethodPost, "/v1/session/sessions",
+		map[string]any{"match_id": "m_op_scope", "players": []string{"p_1", "p_2"}}, "worker-secret")
+	if status != http.StatusOK {
+		t.Fatalf("in-scope op = %d (%v), want 200", status, body)
+	}
+	sessionID, _ := body["session"].(map[string]any)["id"].(string)
+	if sessionID == "" {
+		t.Fatalf("create returned no session id: %v", body)
+	}
+
+	// mark_ready is in the same service, service-auth too, and not in the scope: 403.
+	status, body = doJSON(t, server.URL, http.MethodPost,
+		"/v1/session/sessions/"+sessionID+"/ready", map[string]any{"address": "1.2.3.4", "port": 7777}, "worker-secret")
+	if status != http.StatusForbidden {
+		t.Fatalf("sibling service-auth op = %d (%v), want 403", status, body)
+	}
+	if code, _ := body["error"].(map[string]any)["code"].(string); code != "permission_denied" {
+		t.Fatalf("error code = %q, want permission_denied", code)
+	}
+}
+
+// TestOpScopeTypoFailsAtStartup: an op id that does not exist can never match, so the
+// credential would silently lose the permission it was written for. Startup is the only
+// moment this is cheap to catch.
+func TestOpScopeTypoFailsAtStartup(t *testing.T) {
+	_, err := platform.New(platform.Config{
+		Env:       "dev",
+		DevAuth:   true,
+		Allocator: "local",
+		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ServiceCredentials: httpx.ServiceCredentials{
+			{Name: "nakama", Token: "nakama-secret", Services: []string{"account.logn"}},
+		},
+	})
+	if err == nil {
+		t.Fatal("a misspelled op id must fail platform startup")
+	}
+	if !strings.Contains(err.Error(), "account.logn") {
+		t.Fatalf("error should name the bad entry: %v", err)
+	}
+}

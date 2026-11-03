@@ -93,8 +93,12 @@ func PermissionDenied(message string) *Error { return New(CodePermissionDenied, 
 func NotFound(message string) *Error         { return New(CodeNotFound, message) }
 func Conflict(message string) *Error         { return New(CodeConflict, message) }
 func Precondition(message string) *Error     { return New(CodeFailedPrecondition, message) }
-func Unavailable(message string) *Error      { return New(CodeUnavailable, message) }
-func Internal(message string) *Error         { return New(CodeInternal, message) }
+
+// ResourceExhausted is 429: the caller is legitimate but is asking too often. Distinct
+// from Unavailable (503), which means the server cannot serve right now.
+func ResourceExhausted(message string) *Error { return New(CodeResourceExhausted, message) }
+func Unavailable(message string) *Error       { return New(CodeUnavailable, message) }
+func Internal(message string) *Error          { return New(CodeInternal, message) }
 
 // As normalises any error into an *Error. Unknown values become internal so
 // implementation detail never leaks.

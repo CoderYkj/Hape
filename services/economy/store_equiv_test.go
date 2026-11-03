@@ -3,6 +3,7 @@ package economy_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"testing"
@@ -94,11 +95,13 @@ func TestStoresAgree(t *testing.T) {
 
 	// The ledger is the audit trail; amounts, signs and reasons must match even
 	// though the two stores mint their own ids.
-	memLedger, err := mem.Ledger(ctx, player)
+	// Paged the way a client pages: read until next_after is empty. The page size is small
+	// so the cursor path is exercised rather than accidentally skipped by one big read.
+	memLedger, err := readAllLedger(ctx, mem, player, 2)
 	if err != nil {
 		t.Fatalf("memory ledger: %v", err)
 	}
-	sqlLedger, err := sqlStore.Ledger(ctx, player)
+	sqlLedger, err := readAllLedger(ctx, sqlStore, player, 2)
 	if err != nil {
 		t.Fatalf("sql ledger: %v", err)
 	}
@@ -236,5 +239,26 @@ func TestPGRespectsCancelledContext(t *testing.T) {
 func TestPGRejectsMalformedDSN(t *testing.T) {
 	if _, err := pg.Open(context.Background(), "postgres://nope::bad"); err == nil {
 		t.Fatal("pg.Open accepted a malformed DSN")
+	}
+}
+
+// readAllLedger pages through the ledger with the real cursor loop, so the equivalence test
+// covers paging instead of only the first page.
+func readAllLedger(ctx context.Context, store economy.Store, player string, pageSize int) ([]economy.LedgerEntry, error) {
+	var out []economy.LedgerEntry
+	cursor := ""
+	for {
+		entries, err := store.Ledger(ctx, player, economy.LedgerQuery{Limit: pageSize, After: cursor})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, entries...)
+		if len(entries) < pageSize {
+			return out, nil
+		}
+		cursor = entries[len(entries)-1].ID
+		if len(out) > 1000 {
+			return nil, fmt.Errorf("ledger paging did not terminate")
+		}
 	}
 }

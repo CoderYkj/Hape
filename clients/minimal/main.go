@@ -49,6 +49,37 @@ type identity struct {
 	backendToken string
 }
 
+// caller is one authenticated backend session plus the recipe for renewing it.
+//
+// Player tokens expire (BACKEND_PLAYER_TOKEN_TTL, default 1h). A client that treats a 401
+// as fatal dies mid-match, so "re-authenticate and replay once" is part of the protocol the
+// engine has to implement - and this type is where that lives, so every call gets it
+// instead of only the one path someone remembered.
+type caller struct {
+	baseURL string
+	token   string
+	// relogin re-does step 1 and returns a fresh backend token. Nil means the token cannot
+	// be renewed, in which case a 401 is returned as-is.
+	relogin func() (string, error)
+}
+
+// do issues one call, and on 401 renews the token and replays the request exactly once.
+//
+// Once, not in a loop: if the fresh token is also rejected, the problem is not expiry and
+// retrying makes an outage look like a slow but working client.
+func (c *caller) do(method, path string, body []byte) (int, []byte, error) {
+	status, resp, err := backendRequest(c.baseURL+path, method, body, c.token)
+	if err != nil || status != http.StatusUnauthorized || c.relogin == nil {
+		return status, resp, err
+	}
+	token, err := c.relogin()
+	if err != nil {
+		return status, resp, fmt.Errorf("re-authentication failed: %w", err)
+	}
+	c.token = token
+	return backendRequest(c.baseURL+path, method, body, token)
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "minimal-client: %v\n", err)
@@ -91,9 +122,20 @@ func run() error {
 	}
 	fmt.Printf("1. identity: player=%s (token %d chars)\n", me.playerID, len(me.backendToken))
 
+	// Every request below goes through this caller, so an expired token is renewed once
+	// and the request replayed instead of failing the run.
+	client := &caller{baseURL: backendURL, token: me.backendToken}
+	client.relogin = func() (string, error) {
+		fresh, err := signIn(identityMode, nakamaURL, serverKey, backendURL, deviceID)
+		if err != nil {
+			return "", err
+		}
+		return fresh.backendToken, nil
+	}
+
 	// Step 2: every subsequent call uses the backend token, and the client holds no
 	// credential of its own beyond it.
-	status, body, err := backendRequest(backendURL+"/v1/account/players/"+me.playerID, http.MethodGet, nil, me.backendToken)
+	status, body, err := client.do(http.MethodGet, "/v1/account/players/"+me.playerID, nil)
 	if err != nil {
 		return fmt.Errorf("step 2 (profile): %w", err)
 	}
@@ -103,7 +145,7 @@ func run() error {
 	fmt.Printf("2. profile read: %d bytes\n", len(body))
 
 	// Step 3: enqueue. The client chooses a queue; the server decides the match.
-	ticketID, err := enqueue(backendURL, queue, me.backendToken)
+	ticketID, err := enqueue(client, queue)
 	if err != nil {
 		return fmt.Errorf("step 3 (enqueue): %w", err)
 	}
@@ -111,7 +153,7 @@ func run() error {
 
 	// Step 4: poll the ticket. A client never pops the queue and never reports a
 	// result - both are service/DS operations.
-	status, body, err = backendRequest(backendURL+"/v1/matchmaking/tickets/"+ticketID, http.MethodGet, nil, me.backendToken)
+	status, body, err = client.do(http.MethodGet, "/v1/matchmaking/tickets/"+ticketID, nil)
 	if err != nil {
 		return fmt.Errorf("step 4 (poll): %w", err)
 	}
@@ -142,7 +184,7 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("step 5 (bot sign in): %w", err)
 		}
-		if _, err := enqueue(backendURL, queue, opponent.backendToken); err != nil {
+		if _, err := enqueue(&caller{baseURL: backendURL, token: opponent.backendToken}, queue); err != nil {
 			return fmt.Errorf("step 5 (bot enqueue): %w", err)
 		}
 		fmt.Printf("5. opponent queued: player=%s\n", opponent.playerID)
@@ -150,7 +192,7 @@ func run() error {
 	}
 
 	// Step 6: wait for the matchmaker. The client learns a match id and nothing else.
-	matchID, err := waitForMatch(backendURL, ticketID, me.backendToken, wait)
+	matchID, err := waitForMatch(client, ticketID, wait)
 	if err != nil {
 		return fmt.Errorf("step 6 (wait for match): %w", err)
 	}
@@ -159,7 +201,7 @@ func run() error {
 
 	// Step 7: resolve the match to the server. This is the read path that used to be
 	// missing: a ticket carries a match id, and the client needs an address.
-	sessionID, address, port, err := waitForSession(backendURL, matchID, me.backendToken, wait)
+	sessionID, address, port, err := waitForSession(client, matchID, wait)
 	if err != nil {
 		return fmt.Errorf("step 7 (find the server): %w", err)
 	}
@@ -181,14 +223,14 @@ func run() error {
 
 	// Step 9: the server is authoritative. The client waits for `finished`, then reads
 	// its own payout with its own token - it never learns the result any other way.
-	finalState, err := waitForFinished(backendURL, matchID, me.backendToken, wait)
+	finalState, err := waitForFinished(client, matchID, wait)
 	if err != nil {
 		return fmt.Errorf("step 9 (result): %w", err)
 	}
 	fmt.Printf("9. session state: %s\n", finalState)
 	fmt.Printf("SESSION_STATE=%s\n", finalState)
 
-	status, body, err = backendRequest(backendURL+"/v1/progress/players/"+me.playerID, http.MethodGet, nil, me.backendToken)
+	status, body, err = client.do(http.MethodGet, "/v1/progress/players/"+me.playerID, nil)
 	if err != nil {
 		return fmt.Errorf("step 9 (read payout): %w", err)
 	}
@@ -242,9 +284,9 @@ func signIn(mode, nakamaURL, serverKey, backendURL, deviceID string) (identity, 
 	}
 }
 
-func enqueue(backendURL, queue, token string) (string, error) {
+func enqueue(c *caller, queue string) (string, error) {
 	payload, _ := json.Marshal(map[string]any{"queue": queue})
-	status, body, err := backendRequest(backendURL+"/v1/matchmaking/tickets", http.MethodPost, payload, token)
+	status, body, err := c.do(http.MethodPost, "/v1/matchmaking/tickets", payload)
 	if err != nil {
 		return "", err
 	}
@@ -259,10 +301,10 @@ func enqueue(backendURL, queue, token string) (string, error) {
 }
 
 // waitForMatch polls the ticket until the matchmaker pairs it.
-func waitForMatch(backendURL, ticketID, token string, timeout time.Duration) (string, error) {
+func waitForMatch(c *caller, ticketID string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	for {
-		status, body, err := backendRequest(backendURL+"/v1/matchmaking/tickets/"+ticketID, http.MethodGet, nil, token)
+		status, body, err := c.do(http.MethodGet, "/v1/matchmaking/tickets/"+ticketID, nil)
 		if err != nil {
 			return "", err
 		}
@@ -282,11 +324,11 @@ func waitForMatch(backendURL, ticketID, token string, timeout time.Duration) (st
 }
 
 // waitForSession resolves the match to a listening server.
-func waitForSession(backendURL, matchID, token string, timeout time.Duration) (string, string, int, error) {
+func waitForSession(c *caller, matchID string, timeout time.Duration) (string, string, int, error) {
 	deadline := time.Now().Add(timeout)
 	lastState := ""
 	for {
-		status, body, err := backendRequest(backendURL+"/v1/session/sessions/by-match/"+matchID, http.MethodGet, nil, token)
+		status, body, err := c.do(http.MethodGet, "/v1/session/sessions/by-match/"+matchID, nil)
 		if err != nil {
 			return "", "", 0, err
 		}
@@ -314,11 +356,11 @@ func waitForSession(backendURL, matchID, token string, timeout time.Duration) (s
 }
 
 // waitForFinished waits for the dedicated server's report to land.
-func waitForFinished(backendURL, matchID, token string, timeout time.Duration) (string, error) {
+func waitForFinished(c *caller, matchID string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	state := ""
 	for {
-		status, body, err := backendRequest(backendURL+"/v1/session/sessions/by-match/"+matchID, http.MethodGet, nil, token)
+		status, body, err := c.do(http.MethodGet, "/v1/session/sessions/by-match/"+matchID, nil)
 		if err != nil {
 			return "", err
 		}

@@ -8,6 +8,7 @@ package api
 
 import (
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -35,6 +36,20 @@ func (a AuthKind) SecurityScheme() string {
 	return ""
 }
 
+// QueryParam is one documented query-string parameter.
+//
+// Query parameters belong in the contract for the same reason paths do: a client that
+// sends limit/after is relying on documented behaviour, and an undocumented limit default
+// is a surprise waiting to be discovered in production.
+type QueryParam struct {
+	Name string // e.g. "limit"
+	Type string // "integer", "string" or "boolean"
+	// Required must be false in practice: a required query parameter makes every existing
+	// caller wrong, so it exists for completeness and is called out in review.
+	Required bool
+	Doc      string
+}
+
 // Op is one HTTP operation. Path uses the http.ServeMux wildcard syntax
 // ("/v1/account/players/{player_id}") which is also valid OpenAPI.
 type Op struct {
@@ -48,6 +63,9 @@ type Op struct {
 	Auth       AuthKind
 	Idempotent bool   // safe to retry with the same Idempotency-Key
 	Note       string // implementation note; not published in OpenAPI
+	// Query lists the documented query-string parameters, in the order they should be
+	// rendered. Empty for most operations.
+	Query []QueryParam
 }
 
 // PathParams returns the wildcard names of the pattern, in order.
@@ -94,6 +112,8 @@ func ForService(ops []Op, service string) []Op {
 	return out
 }
 
+var queryNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+
 var validMethods = map[string]bool{
 	http.MethodGet: true, http.MethodPost: true, http.MethodPatch: true,
 	http.MethodPut: true, http.MethodDelete: true,
@@ -136,6 +156,24 @@ func Validate(ops []Op) error {
 		case AuthPublic, AuthPlayer, AuthService:
 		default:
 			return errf("op %q: bad Auth %q", op.ID, op.Auth)
+		}
+		seenParam := map[string]bool{}
+		for _, p := range op.Query {
+			if !queryNamePattern.MatchString(p.Name) {
+				return errf("op %q: query parameter %q must be snake_case", op.ID, p.Name)
+			}
+			if seenParam[p.Name] {
+				return errf("op %q: query parameter %q declared twice", op.ID, p.Name)
+			}
+			seenParam[p.Name] = true
+			switch p.Type {
+			case "integer", "string", "boolean":
+			default:
+				return errf("op %q: query parameter %q has unsupported type %q", op.ID, p.Name, p.Type)
+			}
+			if p.Doc == "" {
+				return errf("op %q: query parameter %q needs a Doc", op.ID, p.Name)
+			}
 		}
 	}
 	return nil

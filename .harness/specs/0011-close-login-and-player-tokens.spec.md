@@ -88,3 +88,7 @@ HS256，常量时间比较，exp 必填
 - [ ] token 吊销（例如封号立即生效）
 - [ ] 是否为玩家 token 增加 `aud`（区分平台/客户端类型）
 - [ ] `clients/minimal` 尚未覆盖"token 过期 → 重放 RPC"这条路径的自动化断言
+## 补记（2026-11-03）
+
+本文未决里的 `clients/minimal` 过期重放断言已由 spec 0020 补上（401 → 重登一次 → 重放，
+`clients/minimal/main_test.go`）。token 吊销与 `aud` 仍未做，见 `docs/roadmap.md` §4。

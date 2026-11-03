@@ -91,3 +91,7 @@ create:
 - [ ] 清扫与"分配中"的更显式协调（例如 `allocation_started_at` + 清扫跳过仍在就绪超时内的行）：
       现在的做法是"事后检测 + 交还"，够用且不需要新状态；如将来出现更长分配的厂商，再考虑前置判断。
 - [ ] 竞态发生次数没有独立指标（目前只有 WARN 日志 + `release_failed_total`）。
+## 补记（2026-11-03）
+
+本文遗留的"竞态发生次数没有独立指标"已由 spec 0020 补上：
+`backend_session_sweep_races_total`（`services/session` 在"分配完成时会话已被清扫关闭"处 +1）。

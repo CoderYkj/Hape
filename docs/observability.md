@@ -20,6 +20,9 @@
 | `backend_release_oldest_pending_seconds` | gauge | 最老的待回收等了多久（从会话结束算，没结束的从创建算，是上界） |
 | `backend_release_failed_total` | counter | 累计失败的回收重试次数 |
 | `backend_release_confirmed_total` | counter | 累计成功的回收重试次数 |
+| `backend_allocations_failed_total` | counter | 分配失败次数（`slo.md` 第 4 条 SLI 的分子一半，spec 0020） |
+| `backend_session_sweep_races_total` | counter | 分配完成时会话已被清扫关闭的次数（spec 0017 遗留的那个数） |
+| `backend_rate_limited_{player,service,public}_total` | counter | 各类调用方被 429 的次数（spec 0020） |
 
 指标由 reconciler 每一轮发布（`Platform.ReconcileOnce`），所以**必须开启**
 `BACKEND_RECONCILE_INTERVAL`（生产 compose 默认 30s）。没开时这些序列不存在，告警不会
@@ -100,6 +103,8 @@ curl -s http://127.0.0.1:9090/api/v1/rules | jq '.data.groups[].rules[].name'
 | `SessionsStuckAllocating` | 分配超过 3 分钟 | warning |
 | `ZombieSession` | ready/in_progress 超过 30 分钟 | warning |
 | `HighServerErrorRatio` | 5xx 比例 > 1%（5 分钟） | critical |
+| `SettlementLatencyDegraded` | 结算 p99 超过 0.3s | warning |
+| `ServiceScopeDenied` | 某凭证在 10 分钟内出现越权（强制）或 would-deny（观察） | warning |
 | `EconomyInternalError` | 钱包/账本操作出现 500 | critical |
 
 前置条件：**必须开启 `BACKEND_RECONCILE_INTERVAL`**（生产 compose 默认 30s）。没开时业务 gauge 不存在，

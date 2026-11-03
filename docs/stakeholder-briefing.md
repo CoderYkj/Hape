@@ -119,7 +119,7 @@ ds: session=s_x runtime_token=present(len=43) service_token=present(len=11) ...
 
 - 日志固定字段：`request_id / op / op_service / caller / status / duration_ms`（`caller` 就是"谁在用哪条凭证"的唯一证据）
 - 指标：请求计数、回收积压（`pending_sessions / max_attempts / oldest_pending_seconds`）、scope 拒绝（强制 与 观察两个计数器）
-- 七条告警规则：回收未确认、未释放分配、分配卡住、僵尸对局、5xx 比例、结算延迟、经济 500
+- 八条告警规则：回收未确认、未释放分配、分配卡住、僵尸对局、5xx 比例、结算延迟、越权调用、经济 500
 - 计数器**零值也注册**——否则 `rate()` 要等"坏事发生过一次"才有数据
 
 ---
@@ -187,7 +187,7 @@ ds: session=s_x runtime_token=present(len=43) service_token=present(len=11) ...
 | 数据 | 单 Postgres、单库事务 | 结算靠单库事务保证原子性 |
 | 扇出 | 进程内调用 | 没有消息队列，重试靠调用方 |
 | 分配 | 1 个并发部署槽（厂商 plan 限制） | 一次只能有一台实例 |
-| 可观测 | 手写指标 + 7 条规则 | 无 tracing、无日志聚合、无长时间压测 |
+| 可观测 | 手写指标 + 8 条规则 | 无 tracing、无日志聚合、无长时间压测 |
 
 他们的量级需要、而这里没有的：无状态水平扩展（会话状态外置）、分区分服与就近匹配、缓存层、异步/最终一致的结算 + 对账、DS fleet 编排（Agones 或自研）、多区域、全链路 tracing、灰度与容量压测、成本核算。
 

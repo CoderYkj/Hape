@@ -108,3 +108,8 @@ s_dmlcbaxn2vr0   local     local-s_...-1       finished  11-03 05:52:13  11-03 0
 - [ ] 成本模型：按 provider/区域的单价把 `instance_seconds` 换算成钱（需要厂商价目）。
 - [ ] 竞态（spec 0017）发生次数没有独立指标，只有 WARN 日志。
 - [ ] 台账清理策略：长期保留会单调增长，可按月归档到冷表。
+## 补记（2026-11-03）
+
+本文遗留的"台账清理策略"已由 spec 0020 落地：迁移 0005 建 `*_archive` 冷表，
+`scripts/db-archive.sh` 搬走"已结束且已确认释放、早于 `ARCHIVE_BEFORE`"的会话（dry-run 默认，
+确认才写，重跑 no-op）。成本模型（单价换算成钱）仍缺厂商价目，见 §未决。

@@ -33,6 +33,9 @@ type Router struct {
 	// observe mode (log-only) exists so a scope policy can be validated against real
 	// traffic before it starts refusing anything.
 	enforceScopes bool
+	// limiter is nil when no class is limited, which is the case every test that does
+	// not opt in runs in.
+	limiter *Limiter
 }
 
 // NewRouter builds a router. auth may be nil only when no authenticated op is
@@ -65,6 +68,9 @@ func NewRouter(service string, log *slog.Logger, auth Authenticator) *Router {
 // "service credential out of scope (not enforced)" lines, fix the scopes, then enforce.
 // Enforcing a policy nobody validated is how a deployment loses an op it needed.
 func (r *Router) SetScopeEnforcement(enforce bool) { r.enforceScopes = enforce }
+
+// SetLimiter installs the inbound rate limiter. nil disables limiting.
+func (r *Router) SetLimiter(l *Limiter) { r.limiter = l }
 
 // Metrics returns the registry this router publishes. Domain services use it to add
 // counters and gauges to the same /metrics endpoint.
@@ -176,6 +182,21 @@ func (r *Router) instrument(op api.Op, h HandlerFunc) http.Handler {
 			}
 		}
 
+		// Rate limiting sits after authentication: a refused credential should cost one
+		// 401, not consume a caller's budget. The class picks the bucket, the identity
+		// picks the key (see rateClass for why the key is not the IP).
+		if r.limiter != nil {
+			class, key := rateClass(op, callerOrZero(ctx), rq)
+			if limit := r.limiter.limits.For(class); limit.Enabled() &&
+				!r.limiter.Allow(class+":"+key, limit) {
+				r.metrics.AddCounter("rate_limited_"+class, 1)
+				sw.Header().Set("Retry-After", "1")
+				apierr.Write(sw, apierr.ResourceExhausted("rate limit exceeded").
+					WithDetail("class", class))
+				return
+			}
+		}
+
 		out, err := h(rq.WithContext(ctx))
 		if err != nil {
 			apierr.Write(sw, err)
@@ -205,7 +226,8 @@ func newRequestID() string {
 // check.
 func (r *Router) scopeAllows(ctx context.Context, op api.Op, p Principal) bool {
 	for _, allowed := range p.Scopes {
-		if allowed == AllServices || allowed == op.Service {
+		// Same three forms the credential parser accepts: "*", a service name, an op id.
+		if allowed == AllServices || allowed == op.Service || allowed == op.ID {
 			return true
 		}
 	}
@@ -221,4 +243,11 @@ func (r *Router) scopeAllows(ctx context.Context, op api.Op, p Principal) bool {
 	}
 	r.metrics.AddCounter("service_scope_denied", 1)
 	return false
+}
+
+// callerOrZero reads the principal the router injected, or the zero value for a public
+// op (there are none today; the limiter still names a class for them).
+func callerOrZero(ctx context.Context) Principal {
+	p, _ := PrincipalFrom(ctx)
+	return p
 }

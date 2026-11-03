@@ -73,7 +73,7 @@
     "/v1/economy/players/{player_id}/ledger": {
       "get": {
         "operationId": "economy.get_ledger",
-        "summary": "Read the caller's ledger",
+        "summary": "Read the caller's ledger, newest pages by cursor",
         "tags": [
           "economy"
         ],
@@ -88,6 +88,24 @@
             "in": "path",
             "required": true,
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Page size, 1-200 (default 50). Larger values are clamped.",
+              "type": "integer"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Cursor from the previous page's next_after. Omit for the first page.",
               "type": "string"
             }
           }
@@ -349,10 +367,15 @@
               "$ref": "#/components/schemas/LedgerEntry"
             },
             "type": "array"
+          },
+          "next_after": {
+            "description": "Cursor for the next page; empty when there is none.",
+            "type": "string"
           }
         },
         "required": [
-          "entries"
+          "entries",
+          "next_after"
         ],
         "type": "object"
       },

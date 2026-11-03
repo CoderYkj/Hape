@@ -53,6 +53,14 @@ type Config struct {
 	// ObserveServiceScopes disables scope enforcement but keeps the log lines. Used to
 	// validate a scope policy against real traffic before it starts refusing calls.
 	ObserveServiceScopes bool
+	// Rate limits per caller class (spec 0020). Zero disables that class; cmd/platform
+	// fills them from the environment, tests and apigen leave them zero.
+	RateLimitPlayer       float64
+	RateLimitPlayerBurst  float64
+	RateLimitService      float64
+	RateLimitServiceBurst float64
+	RateLimitPublic       float64
+	RateLimitPublicBurst  float64
 	// JWTKey is Nakama's session encryption key. Required when DevAuth is false.
 	JWTKey string
 	// JWTIssuer, when set, is checked against the token's `iss`.
@@ -291,6 +299,23 @@ func New(cfg Config) (*Platform, error) {
 	p.router = router
 	p.metrics = router.Metrics()
 
+	// Inbound rate limiting. Off when every class is 0 (tests, apigen); on by default when
+	// the config came from the environment, which is the path a real deployment takes.
+	limits := httpx.RateLimits{
+		Player:  httpx.RateLimit{PerSecond: cfg.RateLimitPlayer, Burst: cfg.RateLimitPlayerBurst},
+		Service: httpx.RateLimit{PerSecond: cfg.RateLimitService, Burst: cfg.RateLimitServiceBurst},
+		Public:  httpx.RateLimit{PerSecond: cfg.RateLimitPublic, Burst: cfg.RateLimitPublicBurst},
+	}
+	if limiter := httpx.NewLimiter(limits); limiter != nil {
+		router.SetLimiter(limiter)
+		router.Metrics().AddCounter("rate_limited_player", 0)
+		router.Metrics().AddCounter("rate_limited_service", 0)
+		router.Metrics().AddCounter("rate_limited_public", 0)
+		log.Info("inbound rate limit enabled",
+			"player_rps", cfg.RateLimitPlayer, "service_rps", cfg.RateLimitService,
+			"public_rps", cfg.RateLimitPublic)
+	}
+
 	p.Account = account.NewWithStore(log.With("domain", "account"), accountStore)
 	if playerMinter != nil {
 		p.Account.SetTokenMinter(playerMinter)
@@ -307,6 +332,10 @@ func New(cfg Config) (*Platform, error) {
 		economy:  p.Economy,
 		rank:     p.Rank,
 	})
+
+	// Session counters: allocations_failed feeds the SLO, session_sweep_races answers
+	// "how often does the sweep close a session mid-allocation".
+	p.Session.SetMetrics(p.metrics)
 
 	p.Account.Register(router)
 	p.Team.Register(router)
@@ -327,6 +356,13 @@ func New(cfg Config) (*Platform, error) {
 	if unknown := creds.UnknownServices(known); len(unknown) > 0 {
 		return nil, fmt.Errorf("platform: service credentials name unknown services: %v (known: %v)",
 			unknown, api.Services(p.router.Ops()))
+	}
+	knownOps := map[string]bool{}
+	for _, op := range p.router.Ops() {
+		knownOps[op.ID] = true
+	}
+	if unknown := creds.UnknownOps(knownOps); len(unknown) > 0 {
+		return nil, fmt.Errorf("platform: service credentials name unknown operations: %v", unknown)
 	}
 
 	return p, nil

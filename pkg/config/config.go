@@ -49,6 +49,14 @@ type Config struct {
 	// default) disables it: a single-process dev server does not need a timer,
 	// and silently failing sessions would be surprising there.
 	ReconcileInterval time.Duration
+	// Inbound rate limits, per class of caller: tokens per second and burst. Zero
+	// disables that class. The defaults are brackets, not policy - see spec 0020.
+	RateLimitPlayer       float64
+	RateLimitPlayerBurst  float64
+	RateLimitService      float64
+	RateLimitServiceBurst float64
+	RateLimitPublic       float64
+	RateLimitPublicBurst  float64
 	// SessionStaleAfter is how long a session may sit in allocating or ready
 	// before the sweep declares it dead.
 	SessionStaleAfter time.Duration
@@ -93,6 +101,13 @@ func Load(service, defaultAddr string) (Config, error) {
 		BatchRegions:          splitList(envOr("BACKEND_REGIONS", "local")),
 		ReconcileInterval:     reconcile,
 		SessionStaleAfter:     staleAfter,
+
+		RateLimitPlayer:       floatOr("BACKEND_RATE_LIMIT_PLAYER", 100),
+		RateLimitPlayerBurst:  floatOr("BACKEND_RATE_LIMIT_PLAYER_BURST", 200),
+		RateLimitService:      floatOr("BACKEND_RATE_LIMIT_SERVICE", 1000),
+		RateLimitServiceBurst: floatOr("BACKEND_RATE_LIMIT_SERVICE_BURST", 2000),
+		RateLimitPublic:       floatOr("BACKEND_RATE_LIMIT_PUBLIC", 50),
+		RateLimitPublicBurst:  floatOr("BACKEND_RATE_LIMIT_PUBLIC_BURST", 100),
 	}, nil
 }
 
@@ -133,6 +148,21 @@ func (c Config) Validate() error {
 	}
 	if c.ReconcileInterval > 0 && c.SessionStaleAfter <= 0 {
 		return fmt.Errorf("BACKEND_SESSION_STALE_AFTER must be positive when the sweep is enabled, got %s", c.SessionStaleAfter)
+	}
+	for _, limit := range []struct {
+		key   string
+		value float64
+	}{
+		{"BACKEND_RATE_LIMIT_PLAYER", c.RateLimitPlayer},
+		{"BACKEND_RATE_LIMIT_PLAYER_BURST", c.RateLimitPlayerBurst},
+		{"BACKEND_RATE_LIMIT_SERVICE", c.RateLimitService},
+		{"BACKEND_RATE_LIMIT_SERVICE_BURST", c.RateLimitServiceBurst},
+		{"BACKEND_RATE_LIMIT_PUBLIC", c.RateLimitPublic},
+		{"BACKEND_RATE_LIMIT_PUBLIC_BURST", c.RateLimitPublicBurst},
+	} {
+		if limit.value < 0 {
+			return fmt.Errorf("%s must not be negative, got %v", limit.key, limit.value)
+		}
 	}
 	if c.SessionStaleAfter < 0 {
 		return fmt.Errorf("BACKEND_SESSION_STALE_AFTER must not be negative, got %s", c.SessionStaleAfter)

@@ -41,12 +41,31 @@ type LedgerEntry struct {
 	CreatedAt time.Time `json:"created_at" doc:"RFC3339 time of the movement."`
 }
 
+// LedgerQuery pages one player's ledger.
+//
+// A cursor (After) rather than an offset: the ledger only appends, so with an offset a
+// movement landing between two page reads would shift every later row and the client
+// would see one entry twice and another never.
+type LedgerQuery struct {
+	// Limit is the maximum number of entries to return. The service clamps it; the store
+	// trusts a positive value (a zero would be a programming error).
+	Limit int
+	// After is the id of the last entry the caller already has. Empty starts at the
+	// beginning.
+	After string
+}
+
+// ErrLedgerCursor means the cursor does not belong to this player's ledger. Both stores
+// return it for the same input, so a client paging by cursor behaves identically on
+// memory and Postgres.
+var ErrLedgerCursor = apierr.Invalid("unknown ledger cursor")
+
 // Store is the persistence seam for the economy.
 type Store interface {
 	Wallet(ctx context.Context, playerID string) (Wallet, error)
 	Grant(ctx context.Context, playerID, idempotencyKey, currency string, amount int64, reason string) (Wallet, bool, error)
 	Spend(ctx context.Context, playerID, idempotencyKey, currency string, amount int64, itemID string) (Wallet, bool, error)
-	Ledger(ctx context.Context, playerID string) ([]LedgerEntry, error)
+	Ledger(ctx context.Context, playerID string, q LedgerQuery) ([]LedgerEntry, error)
 }
 
 // Memory is the in-memory Store.
@@ -135,12 +154,33 @@ func (m *Memory) Spend(_ context.Context, playerID, idempotencyKey, currency str
 	return wallet, true, nil
 }
 
-func (m *Memory) Ledger(_ context.Context, playerID string) ([]LedgerEntry, error) {
+func (m *Memory) Ledger(_ context.Context, playerID string, q LedgerQuery) ([]LedgerEntry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entries := m.ledger[playerID]
-	out := make([]LedgerEntry, len(entries))
-	copy(out, entries)
+
+	start := 0
+	if q.After != "" {
+		start = -1
+		for i, entry := range entries {
+			if entry.ID == q.After {
+				start = i + 1
+				break
+			}
+		}
+		if start < 0 {
+			return nil, ErrLedgerCursor
+		}
+	}
+	if start >= len(entries) {
+		return []LedgerEntry{}, nil
+	}
+	end := len(entries)
+	if q.Limit > 0 && start+q.Limit < end {
+		end = start + q.Limit
+	}
+	out := make([]LedgerEntry, end-start)
+	copy(out, entries[start:end])
 	return out, nil
 }
 
