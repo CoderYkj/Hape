@@ -35,7 +35,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -buildvcs=false -trimpath \
 # ---------------------------------------------------------------------------
 # runtime
 # ---------------------------------------------------------------------------
-FROM alpine:3.20 AS runtime
+FROM alpine:3.24 AS runtime
 
 # Non-root by default: nothing in this process needs to write to the filesystem.
 RUN apk add --no-cache ca-certificates tzdata \

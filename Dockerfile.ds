@@ -38,7 +38,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -buildvcs=false -trimpath \
 # ---------------------------------------------------------------------------
 # runtime
 # ---------------------------------------------------------------------------
-FROM alpine:3.20 AS runtime
+FROM alpine:3.24 AS runtime
 
 # Non-root, like the backend: a game server holds no privileged capability, and the
 # only two things it needs are the network and its results directory.
