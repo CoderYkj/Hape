@@ -106,6 +106,7 @@ func (r *Router) instrument(op api.Op, h HandlerFunc) http.Handler {
 				status = http.StatusOK
 			}
 			r.metrics.Record(op.ID, status)
+			r.metrics.Observe(op.ID, time.Since(start).Seconds())
 			level := slog.LevelInfo
 			if status >= http.StatusInternalServerError {
 				level = slog.LevelError

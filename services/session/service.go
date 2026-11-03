@@ -228,12 +228,15 @@ func (s *Service) create(r *http.Request) (any, error) {
 	}
 
 	allocation, err := s.alloc.Allocate(r.Context(), battlealloc.Request{
-		SessionID:    id,
-		MatchID:      req.MatchID,
-		Queue:        req.Queue,
-		Region:       req.Region,
-		Map:          req.Map,
-		MaxPlayers:   len(req.Players),
+		SessionID:  id,
+		MatchID:    req.MatchID,
+		Queue:      req.Queue,
+		Region:     req.Region,
+		Map:        req.Map,
+		MaxPlayers: len(req.Players),
+		// The DS builds its report from the roster, so the roster travels with the
+		// allocation (injected as PLAYERS). A UE5 server derives the same list from joins.
+		Players:      req.Players,
 		RuntimeToken: runtimeToken,
 	})
 	if err != nil {

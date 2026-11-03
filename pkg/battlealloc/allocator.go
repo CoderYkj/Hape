@@ -37,6 +37,11 @@ type Request struct {
 	// IPs are the players' addresses, used by providers that pick a nearby edge
 	// location. Optional: an empty list means "provider decides".
 	IPs []string
+	// Players is the match roster (backend player ids, in session order). The dedicated
+	// server needs it to build the authoritative report: the report must cover the roster
+	// exactly, and a UE5 server learns the same list from player joins. Injected as PLAYERS
+	// (JSON array) so the reference server can work without a game client.
+	Players []string
 	// RuntimeToken is the per-session credential the dedicated server must present
 	// when it reports ready/results. Adapters inject it into the instance
 	// environment; the platform mints it, the provider only carries it.

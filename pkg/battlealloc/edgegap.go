@@ -307,13 +307,11 @@ func (e *Edgegap) deploy(ctx context.Context, req Request) (string, error) {
 	body := map[string]any{
 		"app_name": e.app,
 		"tags":     []string{"hape"},
-		"env_vars": []map[string]any{
-			{"key": "SESSION_ID", "value": req.SessionID},
-			{"key": "MATCH_ID", "value": req.MatchID},
-			// The DS authenticates its report with this, not with the shared service
-			// token. Hidden so it does not surface in the provider's UI.
-			{"key": "RUNTIME_TOKEN", "value": req.RuntimeToken, "is_hidden": true},
-		},
+		// The DS runtime contract (docs/ds-runtime-contract.md). The names here are the
+		// contract, not an implementation detail of this adapter: a UE5 server reads the same
+		// keys. BACKEND_BASE_URL and BACKEND_SERVICE_TOKEN are deployment-level (they belong
+		// to the app version's environment), everything else is per match.
+		"env_vars": runtimeEnv(req, e.portNum),
 	}
 	if e.version != "" {
 		body["version_name"] = e.version
@@ -543,4 +541,33 @@ func portNames(ports map[string]portMapping) []string {
 		out = append(out, key+":"+p.Name+"/"+strconv.Itoa(p.External))
 	}
 	return out
+}
+
+// runtimeEnv renders the per-match half of the DS runtime contract.
+//
+// The session id is BATTLE_SESSION_ID, not SESSION_ID: the contract name is what the DS
+// reads, and a mismatch here is invisible until the first real deployment (the reference
+// server refuses to start with "missing required environment"). PLAYERS carries the roster
+// as JSON so the reference server can report without a game client.
+func runtimeEnv(req Request, port int) []map[string]any {
+	env := []map[string]any{
+		{"key": "BATTLE_SESSION_ID", "value": req.SessionID},
+		{"key": "MATCH_ID", "value": req.MatchID},
+		{"key": "DS_PORT", "value": strconv.Itoa(port)},
+		// The DS authenticates its report with this, not with the shared service token.
+		// Hidden so it does not surface in the provider's UI.
+		{"key": "RUNTIME_TOKEN", "value": req.RuntimeToken, "is_hidden": true},
+	}
+	if len(req.Players) > 0 {
+		if raw, err := json.Marshal(req.Players); err == nil {
+			env = append(env, map[string]any{"key": "PLAYERS", "value": string(raw)})
+		}
+	}
+	if req.Map != "" {
+		env = append(env, map[string]any{"key": "MAP", "value": req.Map})
+	}
+	if req.Queue != "" {
+		env = append(env, map[string]any{"key": "QUEUE", "value": req.Queue})
+	}
+	return env
 }

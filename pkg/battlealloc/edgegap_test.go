@@ -151,6 +151,8 @@ func TestEdgegapAllocatesAReadyDeployment(t *testing.T) {
 	allocation, err := adapter.Allocate(context.Background(), battlealloc.Request{
 		SessionID: "s_1",
 		MatchID:   "m_1",
+		Map:       "arena_01",
+		Players:   []string{"p_1", "p_2"},
 		IPs:       []string{"198.51.100.9"},
 	})
 	if err != nil {
@@ -180,8 +182,23 @@ func TestEdgegapAllocatesAReadyDeployment(t *testing.T) {
 		m := e.(map[string]any)
 		seen[m["key"].(string)] = m["value"].(string)
 	}
-	if seen["SESSION_ID"] != "s_1" || seen["MATCH_ID"] != "m_1" {
+	// The names here are the runtime contract (docs/ds-runtime-contract.md), not this
+	// adapter's private choice: a DS reads BATTLE_SESSION_ID, and the reference server
+	// refuses to start without it.
+	if seen["BATTLE_SESSION_ID"] != "s_1" || seen["MATCH_ID"] != "m_1" {
 		t.Fatalf("env vars = %v", seen)
+	}
+	if _, ok := seen["SESSION_ID"]; ok {
+		t.Fatalf("SESSION_ID is not the contract name (BATTLE_SESSION_ID is): %v", seen)
+	}
+	if seen["PLAYERS"] != `["p_1","p_2"]` {
+		t.Fatalf("PLAYERS = %q, want the roster as a JSON array", seen["PLAYERS"])
+	}
+	if seen["MAP"] != "arena_01" {
+		t.Fatalf("MAP = %q", seen["MAP"])
+	}
+	if seen["DS_PORT"] != "7777" {
+		t.Fatalf("DS_PORT = %q, want the configured game port", seen["DS_PORT"])
 	}
 
 	// Edgegap wants "Token <token>", not Bearer.

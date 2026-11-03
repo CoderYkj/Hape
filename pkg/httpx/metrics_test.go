@@ -74,3 +74,28 @@ func TestRequestMetricsSurviveAlongsideDomainMetrics(t *testing.T) {
 		t.Fatalf("start time missing:\n%s", body)
 	}
 }
+
+// TestLatencyHistogramRendersCumulativeBuckets pins the shape the SLO query depends on:
+// cumulative `_bucket` counts, a +Inf bucket, and matching _sum/_count.
+func TestLatencyHistogramRendersCumulativeBuckets(t *testing.T) {
+	m := httpx.NewMetrics("platform")
+	m.Observe("session.submit_result", 0.003)
+	m.Observe("session.submit_result", 0.030)
+	m.Observe("session.submit_result", 9.0)
+
+	body := scrape(t, m)
+	for _, want := range []string{
+		`backend_request_duration_seconds_bucket{service="platform",op="session.submit_result",le="0.005"} 1`,
+		`backend_request_duration_seconds_bucket{service="platform",op="session.submit_result",le="0.05"} 2`,
+		`backend_request_duration_seconds_bucket{service="platform",op="session.submit_result",le="+Inf"} 3`,
+		`backend_request_duration_seconds_count{service="platform",op="session.submit_result"} 3`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("histogram output is missing %q:\n%s", want, body)
+		}
+	}
+	// 0.003 + 0.030 + 9.0 = 9.033 seconds
+	if !strings.Contains(body, `backend_request_duration_seconds_sum{service="platform",op="session.submit_result"} 9.033`) {
+		t.Fatalf("histogram sum is wrong:\n%s", body)
+	}
+}

@@ -22,6 +22,21 @@ type Metrics struct {
 	// request latency.
 	counters map[string]int64
 	gauges   map[string]float64
+	// histograms hold latency observations per key (op name). Buckets are fixed: the request
+	// path is known, and a per-op dynamic bucket set would be a configurability problem
+	// nobody asked for.
+	histograms map[string]*histogram
+}
+
+// latencyBuckets are the upper bounds (seconds) of the request duration histogram. They
+// bracket what a local backend actually does (single-digit ms) and still catch the tail
+// (a second or more) that a p99 SLO is about.
+var latencyBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}
+
+type histogram struct {
+	counts []int64 // one per bucket, plus a final +Inf slot
+	sum    float64
+	count  uint64
 }
 
 type metricKey struct {
@@ -32,12 +47,34 @@ type metricKey struct {
 // NewMetrics creates a registry for one service.
 func NewMetrics(service string) *Metrics {
 	return &Metrics{
-		service:  service,
-		started:  time.Now(),
-		counts:   map[string]int64{},
-		counters: map[string]int64{},
-		gauges:   map[string]float64{},
+		service:    service,
+		started:    time.Now(),
+		counts:     map[string]int64{},
+		counters:   map[string]int64{},
+		gauges:     map[string]float64{},
+		histograms: map[string]*histogram{},
 	}
+}
+
+// Observe records one latency observation (seconds) under key.
+func (m *Metrics) Observe(key string, seconds float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	h, ok := m.histograms[key]
+	if !ok {
+		h = &histogram{counts: make([]int64, len(latencyBuckets)+1)}
+		m.histograms[key] = h
+	}
+	index := len(latencyBuckets) // +Inf slot by default
+	for i, bound := range latencyBuckets {
+		if seconds <= bound {
+			index = i
+			break
+		}
+	}
+	h.counts[index]++
+	h.sum += seconds
+	h.count++
 }
 
 // Record counts one finished request.
@@ -101,6 +138,19 @@ func (m *Metrics) Handler() http.Handler {
 		for k, v := range m.gauges {
 			gauges[k] = v
 		}
+		histogramKeys := make([]string, 0, len(m.histograms))
+		for k := range m.histograms {
+			histogramKeys = append(histogramKeys, k)
+		}
+		sort.Strings(histogramKeys)
+		histograms := make(map[string]histogram, len(m.histograms))
+		for k, v := range m.histograms {
+			histograms[k] = histogram{
+				counts: append([]int64(nil), v.counts...),
+				sum:    v.sum,
+				count:  v.count,
+			}
+		}
 		started := m.started.Unix()
 		service := m.service
 		m.mu.Unlock()
@@ -120,6 +170,26 @@ func (m *Metrics) Handler() http.Handler {
 		for _, name := range gaugeNames {
 			fmt.Fprintf(&b, "# TYPE backend_%s gauge\n", name)
 			fmt.Fprintf(&b, "backend_%s{service=%q} %s\n", name, service, formatFloat(gauges[name]))
+		}
+
+		// Latency histograms: `histogram_quantile(0.99, sum(rate(..._bucket[5m])) by (le))` is
+		// the query the SLO in docs/slo.md is written against.
+		for _, key := range histogramKeys {
+			h := histograms[key]
+			fmt.Fprintf(&b, "# TYPE backend_request_duration_seconds histogram\n")
+			cumulative := int64(0)
+			for i, bound := range latencyBuckets {
+				cumulative += h.counts[i]
+				fmt.Fprintf(&b, "backend_request_duration_seconds_bucket{service=%q,op=%q,le=%q} %d\n",
+					service, key, formatFloat(bound), cumulative)
+			}
+			cumulative += h.counts[len(latencyBuckets)]
+			fmt.Fprintf(&b, "backend_request_duration_seconds_bucket{service=%q,op=%q,le=\"+Inf\"} %d\n",
+				service, key, cumulative)
+			fmt.Fprintf(&b, "backend_request_duration_seconds_sum{service=%q,op=%q} %s\n",
+				service, key, formatFloat(h.sum))
+			fmt.Fprintf(&b, "backend_request_duration_seconds_count{service=%q,op=%q} %d\n",
+				service, key, h.count)
 		}
 
 		b.WriteString("# HELP backend_start_time_seconds Unix start time of the process.\n")

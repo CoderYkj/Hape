@@ -66,7 +66,8 @@ make verify                       # Linux / CI
 | AI Agent | `AGENTS.md` -> `.harness/rules/00-global.md` -> 其余规则按编号 |
 | 新人 | 本文件 -> `docs/architecture-map.md`（图）-> `docs/architecture.md`（细节）-> `docs/runbook-local-dev.md` |
 | 改接口的人 | `docs/api-contract.md` + `.harness/rules/30-api-contract.md` |
-| 接战斗服的人 | `docs/ue5-ds-integration.md` + `.harness/rules/90-battle-integration.md` |
+| 接战斗服的人 | `docs/ds-runtime-contract.md`（**契约 v1，评审稿**）+ `docs/ue5-ds-integration.md`（怎么实现）+ `.harness/rules/90-battle-integration.md` |
+| 定 SLO 的人 | `docs/slo.md`（草案 v0：SLI/SLO/预算/容量包络 + 需要的业务决策） |
 | 写客户端的人 | `docs/ue5-client-model.md`（客户端只做五件事 + UE5 转写指引）+ `clients/minimal`（可跑的最小实现，`CLIENT_FULL=1` 会连真实战斗服） |
 | 要接托管厂商的人 | `docs/edgegap-setup.md`（第一家：控制台要建什么、API 形状、后端配置） |
 | 要部署的人 | `docs/deploy.md`（镜像 / compose / 环境变量 / 探针 / 回滚） |

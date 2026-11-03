@@ -89,6 +89,24 @@ groups:
             backend_requests_total by op to find the affected operation, then the request log
             for the matching op at level=ERROR.
 
+      # SLO #2 in docs/slo.md is "settlement p99 <= 300ms". This fires at 1s for ten minutes,
+      # i.e. a real regression rather than a busy afternoon; the target and the alert are
+      # deliberately not the same number.
+      - alert: SettlementLatencyDegraded
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(backend_request_duration_seconds_bucket{op="session.submit_result"}[5m])) by (le)
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "settlement p99 is {{ $value }}s (SLO target 0.3s)"
+          description: >-
+            The settlement path is getting slow. Check the database for lock contention and the
+            request log for slow session.submit_result calls; a match that cannot settle keeps
+            its players waiting and its server billing.
+
   - name: hape.economy
     rules:
       # Money operations failing once is worth a look: the settlement is transactional, so a
