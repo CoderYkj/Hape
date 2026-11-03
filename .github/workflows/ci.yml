@@ -209,7 +209,14 @@ jobs:
         working-directory: nakama/modules
         run: go vet ./...
 
-      - name: build the plugin
+      # The module's own tests: the bridge client is plain HTTP, so its bugs (a missing
+      # Authorization header, a swallowed error) are testable without Nakama. The real load is
+      # proved by the `nakama` job; this is the fast half.
+      - name: go test
+        working-directory: nakama/modules
+        run: go test ./...
+
+      - name: compile the plugin (not the deployment artifact)
         working-directory: nakama/modules
         run: |
           go build -buildmode=plugin -o /tmp/gamemodule.so .

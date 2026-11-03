@@ -67,6 +67,10 @@ func (c *backendClient) login(ctx context.Context, externalID, displayName strin
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// The service token is the process identity: without it the backend answers 401. It was
+	// stored on the client but never sent, which nobody noticed while the plugin was only ever
+	// compiled and never loaded (ADR 0011 made it the real path; the smoke probe found it).
+	req.Header.Set("Authorization", "Bearer "+c.token)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
