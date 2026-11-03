@@ -41,7 +41,7 @@ jobs:
     env:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/gamebackend?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v5
         with:
@@ -141,7 +141,7 @@ jobs:
   image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
 
       - name: build image
@@ -169,7 +169,7 @@ jobs:
   compose:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: validate compose file
         run: docker compose -f deploy/docker-compose.yml config -q
@@ -231,7 +231,7 @@ jobs:
   nakama-module:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v5
         with:
@@ -272,7 +272,7 @@ jobs:
       # The module reaches the backend by compose service name, not localhost.
       BACKEND_BASE_URL: http://backend:8080
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v5
         with:
@@ -422,7 +422,7 @@ jobs:
     env:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/gamebackend?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: apply migrations
         run: sh scripts/db-migrate.sh
@@ -617,7 +617,7 @@ jobs:
   ds:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v5
         with:
@@ -692,7 +692,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: build the image
         run: docker build -t hape:release .
