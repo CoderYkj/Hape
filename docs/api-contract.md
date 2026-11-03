@@ -73,12 +73,16 @@ go test ./...                # 契约测试 + e2e
 的 `in: query` 参数，`api.Validate` 要求名字是 snake_case、类型只能是 `integer`/`string`/
 `boolean`、每个参数必须写 `Doc`。
 
-当前唯一使用方是 `economy.get_ledger`：
+当前两处使用：
 
-| 参数 | 类型 | 说明 |
-|---|---|---|
-| `limit` | integer | 页大小 1–200，缺省 50；超过上限按上限截断（不报错） |
-| `after` | string | 上一页响应里的 `next_after`；省略表示第一页 |
+| op | 参数 | 类型 | 说明 |
+|---|---|---|---|
+| `economy.get_ledger` | `limit` | integer | 页大小 1–200，缺省 50；超过上限按上限截断（不报错） |
+| `economy.get_ledger` | `after` | string | 上一页响应里的 `next_after`；省略表示第一页 |
+| `rank.get_leaderboard` | `limit` | integer | 返回前 N 名，1–200，缺省 50；同样截断而非报错 |
+
+非数字或非正数 → `400 invalid_argument`；**超上限不报错**，按上限返回：一个配错的面板不该把
+读路径变成 400。
 
 **用游标不用偏移**：账本只追加，用 offset 时两页之间新入账一笔会让后面的行整体错位，
 客户端就会重复一行、漏掉一行。游标不存在或不属于该玩家时返回 400，而不是悄悄回到第一页。

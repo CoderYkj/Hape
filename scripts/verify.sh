@@ -78,6 +78,14 @@ go run ./tools/apigen -check || record "contract"
 step "docs (links, index counts, md/html mirrors)"
 sh scripts/docs-check.sh || record "docs"
 
+step "makefile parses"
+if command -v make >/dev/null 2>&1; then
+  make -n help verify test race fmt vet build contract run faked clean >/dev/null 2>&1 ||
+    record "makefile"
+else
+  printf 'make not installed; skipped (CI parses it)\n'
+fi
+
 printf '\n'
 if [ "$fail" -ne 0 ]; then
   printf 'VERIFY FAILED: %s\n' "${failed_steps[*]}"

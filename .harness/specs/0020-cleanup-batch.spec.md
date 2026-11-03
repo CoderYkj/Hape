@@ -183,3 +183,15 @@ staticcheck/govulncheck 的旧版本在 Go 1.27 下编译不过，而 go.mod 还
 插件模块的 `go` 指令跟随的是**官方 pluginbuilder 镜像的工具链**（Nakama 3.22 是 Go 1.22），
 不是本仓库的 1.27。写成 1.27 会让 `docker build nakama` 直接失败——ADR 0011 说的"三个版本
 必须一起动"就包括这一条。等换 Nakama 版本时一起抬。
+## 10. 补记（同日，§6 里四件不需要外部条件的）
+
+| 项 | 落地 | 验证 |
+|---|---|---|
+| Dependabot | `.github/dependabot.yml`：两个 Go 模块（按周、分组一个 PR）、actions、基础镜像（按月）。`nakama-common` 与 `protobuf` 在插件模块里**显式忽略**——它们必须跟随 Nakama 服务端 tag，自动升级会通过 `go build` 却在 `plugin.Open` 失败（ADR 0011） | 文件被 GitHub 解析（不报错）；无法在 CI 里断言"PR 会来"，这是平台行为 |
+| Prometheus 保留 30 天 | prod compose `--storage.tsdb.retention.time=15d → 30d` | `ops` job 的 `promtool check config` 仍通过；与 `docs/slo.md` 的月度窗口一致 |
+| Makefile 不再是双份真相 | `scripts/` 被写明为唯一事实来源；CI 每次 `make -n <所有 target>` 解析一遍；`scripts/verify.sh` 有 make 时也跑 | `verify` job 新增一步；解析失败即红 |
+| 排行榜 `limit` | `rank.get_leaderboard` 增加 `limit`（1–200，缺省 50，超限截断、非数字 400），与 `get_ledger` 同一套 `httpx.QueryInt` 语义 | 新增 `services/rank/service_test.go`：缺省/指定/上限截断/三种非法值；`api/openapi/rank.json` 重新生成 |
+
+另外把部署手册的保留策略写成了**建议值**（`docs/deploy.md` §11.9）：备份 14 天 + 8 周、归档表永久、
+Prometheus 30 天、镜像最近 20 个 sha、日志 20m×5。这些数字要按真实事故复盘调，所以留在手册而不是
+硬编码进脚本。

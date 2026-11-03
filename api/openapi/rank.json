@@ -15,7 +15,7 @@
     "/v1/rank/leaderboards/{board}": {
       "get": {
         "operationId": "rank.get_leaderboard",
-        "summary": "Read a leaderboard",
+        "summary": "Read the top of a leaderboard",
         "tags": [
           "rank"
         ],
@@ -31,6 +31,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "How many entries to return, 1-200 (default 50). Larger values are clamped.",
+              "type": "integer"
             }
           }
         ],

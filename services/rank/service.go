@@ -35,6 +35,13 @@ func (s *Service) Rating(ctx context.Context, playerID string) (int64, error) {
 	return s.store.RatingOf(ctx, DefaultBoard, playerID)
 }
 
+// Leaderboard page sizes. The default is what a UI shows without scrolling; the cap is what
+// keeps one request from returning a whole board.
+const (
+	defaultLeaderboardLimit = 50
+	maxLeaderboardLimit     = 200
+)
+
 // GetLeaderboardResponse is the leaderboard read model.
 type GetLeaderboardResponse struct {
 	Leaderboard Leaderboard `json:"leaderboard"`
@@ -61,9 +68,12 @@ func (s *Service) Register(r *httpx.Router) {
 		Service:  "rank",
 		Method:   http.MethodGet,
 		Path:     "/v1/rank/leaderboards/{board}",
-		Summary:  "Read a leaderboard",
+		Summary:  "Read the top of a leaderboard",
 		Response: api.T(GetLeaderboardResponse{}),
 		Auth:     api.AuthPlayer,
+		Query: []api.QueryParam{
+			{Name: "limit", Type: "integer", Doc: "How many entries to return, 1-200 (default 50). Larger values are clamped."},
+		},
 	}, s.getLeaderboard)
 
 	r.Handle(api.Op{
@@ -84,7 +94,13 @@ func (s *Service) getLeaderboard(r *http.Request) (any, error) {
 	if _, err := httpx.RequirePlayer(r); err != nil {
 		return nil, err
 	}
-	limit := 50
+	// The page size used to be a hardcoded 50 with no way to ask for anything else. It is a
+	// query parameter now, with the same clamp-not-reject rule as the ledger: an oversized
+	// limit is bounded, a non-numeric one is a client bug.
+	limit, err := httpx.QueryInt(r, "limit", defaultLeaderboardLimit, maxLeaderboardLimit)
+	if err != nil {
+		return nil, err
+	}
 	board, err := s.store.Top(r.Context(), httpx.Param(r, "board"), limit)
 	if err != nil {
 		return nil, err

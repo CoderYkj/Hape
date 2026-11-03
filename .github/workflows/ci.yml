@@ -128,6 +128,12 @@ jobs:
       - name: docs links, index counts and mirrors agree
         run: sh scripts/docs-check.sh
 
+      # The Makefile is a convenience layer: CI runs the scripts directly, Windows has no
+      # make at all. Parsing every target here is what keeps a typo in it from rotting for
+      # months, which is the only failure mode a file nobody executes can have.
+      - name: the Makefile's targets still parse
+        run: make -n help verify test race fmt vet build contract run faked ds ds-docker db-migrate db-probe clean > /dev/null
+
   # The Dockerfile and the compose stack are not runnable on a developer machine
   # without Docker, so they are exercised here instead: build the image, run it,
   # probe it; then bring up compose with a real database, apply the migrations and

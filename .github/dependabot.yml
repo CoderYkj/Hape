@@ -1,0 +1,53 @@
+# dependabot.yml - dependency updates for the two Go modules and the pinned base images.
+#
+# Why bother with one third-party dependency: the upgrade that mattered so far (pgx
+# v5.7.6 -> v5.9.2) was forced by govulncheck finding a reachable SQL-injection advisory.
+# govulncheck only tells you about *known* problems in what you already have; Dependabot is
+# what keeps the fixes flowing without anyone watching releases by hand.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+    groups:
+      # One PR per week instead of six: the module graph is tiny, and a queue of
+      # single-line bumps is how an upgrade policy gets ignored.
+      go-dependencies:
+        patterns: ["*"]
+
+  # The plugin is a separate module built by Nakama's own toolchain (ADR 0011): its
+  # nakama-common and protobuf versions must match the Nakama server tag. A bump here would
+  # pass `go build` and fail at plugin.Open on a real server - the exact failure ADR 0011
+  # documents - so those two are ignored and move only with the Nakama version.
+  - package-ecosystem: gomod
+    directory: "/nakama/modules"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps(nakama)
+    ignore:
+      - dependency-name: "github.com/heroiclabs/nakama-common"
+      - dependency-name: "google.golang.org/protobuf"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: deps(actions)
+
+  # Base images: golang/alpine in the two Dockerfiles. (The Nakama image tags are build
+  # args, not FROM literals, so they are not discovered here - scripts/nakama-version-check.sh
+  # owns that triple.)
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: deps(docker)

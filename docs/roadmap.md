@@ -145,12 +145,12 @@
 
 | 项 | 现状 | 代价 | 状态 |
 |---|---|---|---|
-| 依赖漏洞扫描 | 无 `govulncheck`、无 Dependabot/Renovate | 低（依赖少），但漏了只能在事故里发现 | ✅ `verify` job 跑 `govulncheck`（可达漏洞 = 构建失败） |
+| 依赖漏洞扫描 | 无 `govulncheck`、无 Dependabot/Renovate | 低（依赖少），但漏了只能在事故里发现 | ✅ `verify` job 跑 `govulncheck`；Dependabot 管两个 Go 模块 + actions + 基础镜像（`nakama-common`/`protobuf` 明确忽略，见 ADR 0011） |
 | 静态检查层 | 只有 `gofmt` + `go vet` | 中 | ✅ `staticcheck`（版本钉住）进 `verify` job 与 `scripts/verify.*` |
 | 覆盖率 | CI 不输出、无阈值 | 中 | ✅ `scripts/coverage-check.sh`，不含 `tools/` 的地板 58%（当前 60.5%） |
 | **文档门禁** | 链接检查曾是 `docs/README.md` 里的手工命令；`roadmap.md ↔ .html` 靠人同步 | 已发生 5 次计数不一致（本次盘点修的就是） | ✅ `scripts/docs-check.sh` + `verify` job |
 | 发布说明 | 镜像按 `<sha>` 推，无 CHANGELOG/release notes | 回滚靠人记 | ⬜ 以后 |
-| Makefile | 15 个 target，CI 一个都没用；Windows 没有 `make` | 低，但是双份真相 | ⬜ 以后 |
+| Makefile | 15 个 target，CI 一个都没用；Windows 没有 `make` | 低，但是双份真相 | ✅ CI 每次 `make -n` 解析所有 target；`scripts/` 写明是唯一事实来源 |
 
 ### 6.2 运维（比 §1.1 更细）
 
@@ -158,7 +158,7 @@
 |---|---|---|
 | **告警送不到人** | 规则会触发，但 `deploy/prometheus/` 只有抓取配置与规则，没有 Alertmanager：没有路由、去重、静默、接收人 | ✅ `alertmanager.yml` + prod compose 的 `observability` profile + `ops` job 用 `amtool check-config` 校验 |
 | 归档只做了一半 | 只搬 `finished` 且已确认释放的会话；`failed` 会话永久堆在源表；也没有"搬回来"的脚本 | ✅ `failed` 会话纳入（不待回收者）、`scripts/db-archive-restore.sh`、`ops` job 断言双向 |
-| 30 天窗口 vs 15 天保留 | SLO 要 30 天窗口，Prometheus `retention=15d` | ⬜ 提高保留或加远端写入 |
+| 30 天窗口 vs 15 天保留 | SLO 要 30 天窗口，Prometheus 只有 15d | ✅ `retention=30d`（与窗口一致）；更长的窗口需要远端写入 |
 | 日志聚合与 tracing | 指标之外没有任何横切观测 | ⬜ 有 k8s/托管日志时再上 |
 | 镜像与备份的保留策略 | 未定（`deploy.md` §11.7 自己列为"没有 CI 覆盖"） | ⬜ 部署选择 |
 | 告警抑制/静默策略 | Alertmanager 配置里 `inhibit_rules` 是空的，注释写清了原因（没有发布标记可依据） | ⬜ 有发布钩子后再加 |
@@ -169,7 +169,7 @@
 |---|---|---|
 | **队伍排队只做了一半** | `CreateTicketRequest.Party` 会存进队列表，但 `store.Pop` 的配对逻辑完全不看 party——同一队伍可能被拆到不同对局 | 产品拍板：party 参与配对，还是契约里明确"仅记录" |
 | **economy 没有价目表** | `purchase` 的 `amount` 由调用方传，注释写"the server owns pricing"，但代码里没有价格来源 | 产品拍板：定价权归调用方还是要有目录/价目 |
-| 排行榜写死 50 条 | `rank.get_leaderboard` 里 `limit := 50`，无查询参数、无周期/赛季（刚给 ledger 做完游标分页，这里反而更差） | 领域设计 |
+| 排行榜周期/赛季 | `limit` 已是查询参数（1–200，缺省 50）；但 `Season` 字段恒为默认值，没有赛季重置 | 领域设计 |
 | 无商店/物品目录、无成就/任务、无 MMR 衰减 | 只有 `economy.grant`/`purchase`/`wallet`/`ledger` | 产品 |
 | 无好友/邀请/私聊 | team 服务自己实现了 create/join/get，Nakama 的社交能力没接 | 产品 |
 

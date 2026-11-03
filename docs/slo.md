@@ -90,7 +90,7 @@ avg_over_time((backend_unreleased_allocations > bool 0)[30d:1m])
 |---|---|---|
 | 分配失败计数 | 第 4 项 | `backend_allocations_failed_total` counter（Allocate 返回错误处 +1） |
 | DS 侧指标（上报成功/失败、上报耗时） | 第 6 项 | 需要 DS 暴露指标或上报时带上结果，属契约 v2 讨论 |
-| 长期存储（30 天 retention 已配 15d） | 全部月度窗口 | 提高 retention 或加远端写入 |
+| 长期存储（30 天窗口） | 全部月度窗口 | 已把 Prometheus `retention` 提到 **30d**（与窗口一致）；再长就需要远端写入 |
 
 ## 7. 与现有告警的对应关系
 

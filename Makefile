@@ -1,4 +1,8 @@
-# Convenience targets for Linux/macOS/CI. Windows: use scripts/verify.ps1.
+# Convenience targets for machines with `make`. The scripts in scripts/ are the source of
+# truth and CI runs those directly (Windows users have no make at all, so anything only
+# reachable through this file would be unavailable to them).
+#
+# CI parses this file (`make -n <targets>`) on every push so a typo here cannot rot quietly.
 GO ?= go
 export GOFLAGS ?= -buildvcs=false
 

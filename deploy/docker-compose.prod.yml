@@ -92,7 +92,9 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=15d
+      # 30d, not 15d: docs/slo.md measures a 30-day window, and a retention shorter than the
+      # window makes "was the SLO met last month" unanswerable by the time anyone asks.
+      - --storage.tsdb.retention.time=30d
     volumes:
       - ./prometheus:/etc/prometheus:ro
       - promdata:/prometheus
