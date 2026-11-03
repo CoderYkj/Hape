@@ -209,7 +209,7 @@ graph TB
 
 | job | 覆盖 | 标注 |
 |---|---|---|
-| `verify` | gofmt / vet / build / `go test -race`（含真库等价性）/ schema 探针 / 契约漂移 | ✅ |
+| `verify` | gofmt / vet / build / **staticcheck** / **govulncheck** / `go test -race`（含真库等价性）/ schema 探针 / **覆盖率地板** / 契约漂移 / 文档门禁 | ✅ |
 | `image` | 构建后端镜像、非 root、探活、/metrics | ✅ |
 | `compose` | postgres + backend 起栈、迁移、48 条断言、断言一次登录落库 | ✅ |
 | `nakama-module` | Go 插件的快速类型检查 + 三方版本一致性（真构建在 `nakama` job 的镜像里，产物级断言也在那里） | ✅ |

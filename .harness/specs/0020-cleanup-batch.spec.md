@@ -156,3 +156,30 @@ BACKEND_SERVICE_CREDENTIALS="nakama=<tok>:account.login,account.get_player
 | **文档门禁缺失**（链接、索引计数、md↔html 镜像） | `scripts/docs-check.sh`；`verify` job 与 `scripts/verify.sh` 都调用 | 本地负例实测：md 多一行 → 抓到；引用不存在的文档 → 抓到 |
 
 这三条都进 `roadmap.md` §6.2/§6.1 并标 ✅，不属于本文原本的八项。
+## 9. 补记（同日，工具链与三件工程门禁）
+
+盘点 §6.1 里的三件"便宜的"顺手做掉，同时把工具链统一到 Go 1.27——这两件事互相依赖：
+staticcheck/govulncheck 的旧版本在 Go 1.27 下编译不过，而 go.mod 还写着 1.23。
+
+| 项 | 落地 | 验证 |
+|---|---|---|
+| 工具链统一 | 根 `go.mod` 1.23.0 → **1.27.0**；`Dockerfile` / `Dockerfile.ds` 的 `GO_IMAGE` → `golang:1.27-alpine`；CI 四个 `go-version-file: go.mod` 自动跟随 | CI 全绿；本机 `go1.27.3` 就是实际跑过的版本 |
+| staticcheck | CI `verify` job + `scripts/verify.{sh,ps1}`；**版本钉住 v0.8.2** | 首次跑出 5 条真问题（死代码、测试里被丢弃的 status），已全部修掉，不是抑制 |
+| govulncheck |同上，钉 v1.9.0；**可达漏洞 = 构建失败** | 首次跑出 3 个可达漏洞，见下 |
+| 覆盖率 | `scripts/coverage-check.sh`：不含 `tools/` 的地板 58%（当前 60.5%），CI 强制，本地无数据库时只报告 | 本地负例：`COVERAGE_MIN=99` → 退出 1；告警文案给出实际值 |
+
+### 9.1 依赖升级（govulncheck 逼出来的，不是我挑的）
+
+- `github.com/jackc/pgx/v5` v5.7.6 → **v5.9.2**：`GO-2026-5004`（占位符与 dollar-quoted
+  字符串混淆导致 SQL 注入）在 `session.PG.Census` 的路径上**可达**。
+- `golang.org/x/text` v0.24.0 → **v0.41.0**：`GO-2026-6629`（precis 解析崩溃）与
+  `GO-2026-5970`（非法输入死循环），均在 `pg.Open → pgxpool.NewWithConfig` 路径上可达。
+
+升级后全量测试（含真 Postgres 的等价性套件）绿。ADR 0006 已加补记：钉的版本从 v5.7.6
+变为 v5.9.2，理由从"不抬高 Go 下限"变为"修复可达漏洞"。
+
+### 9.2 nakama/modules 不在这次统一里（有意）
+
+插件模块的 `go` 指令跟随的是**官方 pluginbuilder 镜像的工具链**（Nakama 3.22 是 Go 1.22），
+不是本仓库的 1.27。写成 1.27 会让 `docker build nakama` 直接失败——ADR 0011 说的"三个版本
+必须一起动"就包括这一条。等换 Nakama 版本时一起抬。

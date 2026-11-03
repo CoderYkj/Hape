@@ -14,7 +14,7 @@ type nested struct {
 type sample struct {
 	Name    string    `json:"name" doc:"the name"`
 	Hidden  string    `json:"-"`
-	private string    //nolint:unused // proves unexported fields are skipped
+	private string    //lint:ignore U1000 proves unexported fields are not part of the shape
 	Opt     int64     `json:"opt,omitempty"`
 	When    time.Time `json:"when"`
 	Tags    []string  `json:"tags"`

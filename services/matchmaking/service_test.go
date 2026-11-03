@@ -18,7 +18,6 @@ import (
 type brokenStore struct {
 	Store
 	failLookup bool
-	failCreate bool
 }
 
 func (b brokenStore) FindWaitingByPlayer(context.Context, string, string) (Ticket, bool, error) {

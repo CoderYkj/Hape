@@ -262,9 +262,9 @@
 <table>
 <thead><tr><th>项</th><th>现状</th><th>代价</th><th>状态</th></tr></thead>
 <tbody>
-<tr><td>依赖漏洞扫描</td><td>无 <code>govulncheck</code>、无 Dependabot；CI 只有 <code>go vet</code></td><td>低（依赖少），漏了只能在事故里发现</td><td><span class="badge todo">⬜ 2 小时</span></td></tr>
-<tr><td>静态检查层</td><td>只有 <code>gofmt</code> + <code>go vet</code>，无 staticcheck/gosec</td><td>中</td><td><span class="badge todo">⬜ 半天</span></td></tr>
-<tr><td>覆盖率</td><td>CI 不输出、无阈值</td><td>中（<code>go test -cover</code> 一行）</td><td><span class="badge todo">⬜ 1 小时</span></td></tr>
+<tr><td>依赖漏洞扫描</td><td>无 <code>govulncheck</code>、无 Dependabot</td><td>低（依赖少），漏了只能在事故里发现</td><td><span class="badge ok">✅ verify job 可达漏洞即失败</span></td></tr>
+<tr><td>静态检查层</td><td>只有 <code>gofmt</code> + <code>go vet</code></td><td>中</td><td><span class="badge ok">✅ staticcheck（版本钉住）</span></td></tr>
+<tr><td>覆盖率</td><td>CI 不输出、无阈值</td><td>中</td><td><span class="badge ok">✅ 地板 58%（当前 60.5%，不含 tools）</span></td></tr>
 <tr><td><strong>文档门禁</strong></td><td>链接检查曾是手工命令；<code>roadmap.md ↔ .html</code> 靠人同步</td><td>已发生 5 次计数不一致</td><td><span class="badge ok">✅ scripts/docs-check.sh + verify job</span></td></tr>
 <tr><td>发布说明</td><td>镜像按 <code>&lt;sha&gt;</code> 推，无 CHANGELOG</td><td>回滚靠人记</td><td><span class="badge todo">⬜ 以后</span></td></tr>
 <tr><td>Makefile</td><td>15 个 target，CI 一个都没用；Windows 没有 <code>make</code></td><td>低，但是双份真相</td><td><span class="badge todo">⬜ 以后</span></td></tr>

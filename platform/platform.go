@@ -125,7 +125,8 @@ func New(cfg Config) (*Platform, error) {
 	if alloc != nil {
 		log.Info("allocator selected", "provider", alloc.Provider(), "override", true)
 	} else if cfg.Allocator == "edgegap" {
-		alloc = battlealloc.New(cfg.Allocator)
+		// No alloc.New here: this branch always ends with the edgegap allocator (line below),
+		// and the previous assignment was dead - staticcheck caught it.
 		edgegapCfg := battlealloc.EdgegapConfig{
 			Token:   cfg.EdgegapToken,
 			AppName: cfg.EdgegapApp,

@@ -149,8 +149,7 @@ docs/           架构、契约、UE5 对接、本地运行手册、部署手册
   以及缺 `RUNTIME_TOKEN` 时容器**拒绝启动**。本机 `-launch-ds exec` 实跑通过，
   `-crash-restart` 两次启动复用同一个 `result_id`。
   **仍未复验**：Edgegap 的 `env_vars` 是否真的落进实例环境（机制已验证，厂商侧待真机）
-- **CI 全绿**（GitHub Actions，`ubuntu-latest`，8 个 job）：`verify`（`gofmt` / `go vet` /
-  `go build` / `go test -race`，含真 Postgres 里的七个等价性测试 / schema 探针 / 契约漂移）、
+- **CI 全绿**（GitHub Actions，`ubuntu-latest`，8 个 job）：`verify`（`gofmt` / `go vet` / `go build` / **`staticcheck`** / **`govulncheck`** / `go test -race`，含真 Postgres 里的七个等价性测试 / schema 探针 / **覆盖率地板 58%** / 契约漂移 / 文档门禁）、
   `image`、`compose`、`nakama-module`、`nakama`、`ops`、`ds`、`release`。
   本机没有 C 编译器，`-race` 与插件编译只能在这里真跑——所以它们不是"本机已验证"，
   而是"CI 已验证"。

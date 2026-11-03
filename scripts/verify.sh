@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # verify — the single gate for this repo (Linux / macOS / CI).
 #
-#   ./scripts/verify.sh          # gofmt + vet + build + test + contract
+#   ./scripts/verify.sh          # gofmt + vet + build + staticcheck + govulncheck + test + coverage + contract + docs
+#   RACE=1 ./scripts/verify.sh   # same, with the race detector
+'
+@'
+#   ./scripts/verify.sh          # gofmt + vet + build + staticcheck + govulncheck + test + coverage + contract + docs
 #   RACE=1 ./scripts/verify.sh   # same, with the race detector
 set -uo pipefail
 
@@ -31,15 +35,41 @@ fi
 step "go vet"
 go vet ./... || record "go vet"
 
+# staticcheck and govulncheck are installed by the operator, not silently by this script:
+# a gate that downloads a tool mid-run is a gate that changes what it checks on its own.
+step "staticcheck"
+if command -v staticcheck >/dev/null 2>&1; then
+  staticcheck ./... || record "staticcheck"
+else
+  printf 'staticcheck not installed (go install honnef.co/go/tools/cmd/staticcheck@v0.8.2); skipped\n'
+fi
+
+step "govulncheck"
+if command -v govulncheck >/dev/null 2>&1; then
+  govulncheck ./... || record "govulncheck"
+else
+  printf 'govulncheck not installed (go install golang.org/x/vuln/cmd/govulncheck@v1.9.0); skipped\n'
+fi
+
 step "go build"
 go build ./... || record "go build"
 
 if [ "${RACE:-0}" = "1" ]; then
   step "go test -race"
-  go test -race ./... || record "go test"
+  go test -race -coverprofile="$cache_root/cover.out" ./... || record "go test"
 else
   step "go test"
-  go test ./... || record "go test"
+  go test -coverprofile="$cache_root/cover.out" ./... || record "go test"
+fi
+
+step "coverage floor"
+if [ -n "${BACKEND_TEST_DATABASE_URL:-}" ]; then
+  sh scripts/coverage-check.sh "$cache_root/cover.out" || record "coverage"
+else
+  # Without the database the equivalence suites skip, so the number is not comparable with
+  # CI's. Report it and let CI enforce the floor instead of failing a local run for it.
+  printf 'no BACKEND_TEST_DATABASE_URL: reporting coverage only (CI enforces the floor)\n'
+  COVERAGE_MIN=0 sh scripts/coverage-check.sh "$cache_root/cover.out" || record "coverage"
 fi
 
 step "contract (apigen -check)"

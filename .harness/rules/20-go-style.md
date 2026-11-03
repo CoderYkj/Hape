@@ -77,6 +77,17 @@ tools/*          一次性工具（apigen、fakeds）
 - 一行一个事件；关键字段：`request_id`、`op`、`player_id`、`result_id`。
 - 不打 token、不打完整请求体、不打 PII。
 
+## 工具门禁
+
+`gofmt` + `go vet` 是底线，不是全部：
+
+- `staticcheck ./...`：死代码、无意义赋值、可疑 API 用法。被它指出时改代码，
+  不要加 `//lint:ignore` 了事——真要抑制，注释里写清为什么（`shape_test.go` 的那处是
+  唯一一个，理由是"证明未导出字段不进契约"）。
+- `govulncheck ./...`：只报**可达**漏洞。它红了就升依赖或删调用路径，不要 `-show` 掉。
+
+两者都进 CI 的 `verify` job，本地用 `scripts/verify.*` 跑同一套（没装工具时跳过并提示版本）。
+
 ## 反例清单（见到就改）
 
 ```go

@@ -65,6 +65,23 @@ jobs:
       - name: go build
         run: go build ./...
 
+      # staticcheck is a superset of vet with real signal (dead code, useless assignments,
+      # questionable API use). The version is pinned: a new release adds checks, and an
+      # unpinned staticcheck would turn an unrelated push red.
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+          "$(go env GOPATH)/bin/staticcheck" ./...
+
+      # govulncheck reports vulnerabilities whose symbols this code actually reaches (not
+      # every advisory in the dependency graph), so a finding here is actionable. It exits 3
+      # on findings - which is the point: a vulnerable dependency is a failing build, not a
+      # dashboard nobody opens.
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
       - name: migrate
         run: |
           for f in db/migrations/*.sql; do
@@ -79,10 +96,10 @@ jobs:
             psql "$DATABASE_URL" -t -q -v ON_ERROR_STOP=1 -f "$f"
           done
 
-      - name: go test (race, with database)
+      - name: go test (race, with database, coverage)
         env:
           BACKEND_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/gamebackend?sslmode=disable
-        run: go test -race -v ./... | tee /tmp/go-test.log
+        run: go test -race -v -coverprofile=/tmp/cover.out ./... | tee /tmp/go-test.log
 
       # A green run is not proof that the database tests executed: they skip when
       # BACKEND_TEST_DATABASE_URL is unset, and a skip looks like a pass. This
@@ -94,6 +111,9 @@ jobs:
             exit 1
           fi
           grep -c 'PASS: TestStoresAgree' /tmp/go-test.log
+
+      - name: coverage floor
+        run: sh scripts/coverage-check.sh /tmp/cover.out
 
       - name: contract drift
         run: |

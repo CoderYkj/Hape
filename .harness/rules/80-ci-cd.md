@@ -3,14 +3,26 @@
 ## CI 必须通过的作业（顺序即依赖）
 
 ```yaml
-1. format   gofmt -l .                  # 有输出即失败
-2. vet      go vet ./...
-3. build    go build ./...
-4. test     go test -race ./...
-5. contract go run ./tools/apigen -check
+1. format      gofmt -l .                            # 有输出即失败
+2. vet         go vet ./...
+3. build       go build ./...
+4. staticcheck staticcheck ./...                     # 版本钉住：v0.8.2
+5. vuln        govulncheck ./...                     # 可达漏洞 → 退出码 3 → 失败
+6. test        go test -race -coverprofile=... ./... # 数据库套件不许 skip
+7. coverage    sh scripts/coverage-check.sh          # 不含 tools/ 的地板 58%
+8. contract    go run ./tools/apigen -check
+9. docs        sh scripts/docs-check.sh              # 链接 / 索引计数 / md↔html 镜像
 ```
 
-失败优先级：format → vet → build → test → contract。前一个失败不跑后面（省 CI 时间，错误更聚焦）。
+失败优先级按上面的顺序。前一个失败不跑后面（省 CI 时间，错误更聚焦）。
+
+三条附加规则：
+
+- **工具版本钉住**（`staticcheck@v0.8.2`、`govulncheck@v1.9.0`）：新版本会新增检查，
+  不钉的话一次无关的 push 会突然变红，而人只会记得"CI 又不稳"。
+- **`govulncheck` 失败不许降级成警告**：它只报**代码真的走到**的漏洞。要合入就得升级依赖
+  或删掉调用路径，两者都是真修复。
+- **覆盖率地板是棘轮**：降它就等于承认可以往回退。真要降，先在这里写清理由。
 
 CI 除了 `verify` 还有三个 job，专做本机做不了的事：
 

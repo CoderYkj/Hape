@@ -145,9 +145,9 @@
 
 | 项 | 现状 | 代价 | 状态 |
 |---|---|---|---|
-| 依赖漏洞扫描 | 无 `govulncheck`、无 Dependabot/Renovate；CI 只有 `go vet` | 低（依赖少），但漏了只能在事故里发现 | ⬜ 2 小时 |
-| 静态检查层 | 只有 `gofmt` + `go vet`，无 staticcheck/gosec | 中 | ⬜ 半天 |
-| 覆盖率 | CI 不输出、无阈值 | 中（`go test -cover` 一行） | ⬜ 1 小时 |
+| 依赖漏洞扫描 | 无 `govulncheck`、无 Dependabot/Renovate | 低（依赖少），但漏了只能在事故里发现 | ✅ `verify` job 跑 `govulncheck`（可达漏洞 = 构建失败） |
+| 静态检查层 | 只有 `gofmt` + `go vet` | 中 | ✅ `staticcheck`（版本钉住）进 `verify` job 与 `scripts/verify.*` |
+| 覆盖率 | CI 不输出、无阈值 | 中 | ✅ `scripts/coverage-check.sh`，不含 `tools/` 的地板 58%（当前 60.5%） |
 | **文档门禁** | 链接检查曾是 `docs/README.md` 里的手工命令；`roadmap.md ↔ .html` 靠人同步 | 已发生 5 次计数不一致（本次盘点修的就是） | ✅ `scripts/docs-check.sh` + `verify` job |
 | 发布说明 | 镜像按 `<sha>` 推，无 CHANGELOG/release notes | 回滚靠人记 | ⬜ 以后 |
 | Makefile | 15 个 target，CI 一个都没用；Windows 没有 `make` | 低，但是双份真相 | ⬜ 以后 |

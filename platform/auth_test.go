@@ -103,6 +103,9 @@ func TestJWTModeIsUsableEndToEnd(t *testing.T) {
 
 	// The development bearer format must not work once dev auth is off.
 	status, _ = doJSON(t, server.URL, http.MethodGet, "/v1/account/players/"+playerID, nil, "")
+	if status != http.StatusUnauthorized {
+		t.Fatalf("no token in JWT mode = %d, want 401", status)
+	}
 	req, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/account/players/"+playerID, nil)
 	req.Header.Set("Authorization", "Bearer dev-player-"+playerID)
 	resp, err := http.DefaultClient.Do(req)

@@ -39,11 +39,6 @@ type histogram struct {
 	count  uint64
 }
 
-type metricKey struct {
-	op     string
-	status int
-}
-
 // NewMetrics creates a registry for one service.
 func NewMetrics(service string) *Metrics {
 	return &Metrics{
